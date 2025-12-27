@@ -1,0 +1,41 @@
+// Package cache provides a framework for implementing and registering different cache backends.
+package cache
+
+import (
+	"context"
+	"io"
+	"time"
+
+	"github.com/alecthomas/errors"
+	"github.com/alecthomas/hcl"
+)
+
+var registry = map[string]func(config *hcl.Block) (Cache, error){}
+
+// Factory is a function that creates a new cache instance from the given hcl-tagged configuration struct.
+type Factory[Config any, C Cache] func(ctx context.Context, config Config) (C, error)
+
+// Register a cache factory function.
+func Register[Config any, C Cache](id string, factory Factory[Config, C]) {
+	registry[id] = func(config *hcl.Block) (Cache, error) {
+		var cfg Config
+		if err := hcl.UnmarshalBlock(config, &cfg); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		return factory(context.Background(), cfg)
+	}
+}
+
+// A Cache knows how to retrieve, create and delete files from a cache.
+type Cache interface {
+	// Open an existing file in the cache.
+	Open(ctx context.Context, path string) (io.ReadCloser, error)
+	// Create a new file in the cache.
+	//
+	// The file must be atomically created once closed.
+	Create(ctx context.Context, path string, ttl time.Duration) (io.WriteCloser, error)
+	// Delete a file from the cache.
+	Delete(ctx context.Context, path string) error
+	// Close the Cache.
+	Close() error
+}
