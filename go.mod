@@ -3,7 +3,7 @@ module github.com/block/sfptc
 go 1.25.5
 
 require (
-	github.com/alecthomas/hcl v0.5.5
+	github.com/alecthomas/hcl/v2 v2.3.0
 	github.com/alecthomas/kong v1.13.0
 	github.com/lmittmann/tint v1.1.2
 )
@@ -16,7 +16,7 @@ require (
 require (
 	github.com/alecthomas/assert/v2 v2.11.0
 	github.com/alecthomas/errors v0.8.3
-	github.com/alecthomas/participle/v2 v2.0.0-beta.5 // indirect
+	github.com/alecthomas/participle/v2 v2.1.4 // indirect
 	github.com/alecthomas/repr v0.5.2 // indirect
 	github.com/pkg/xattr v0.4.12
 )

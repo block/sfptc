@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/alecthomas/errors"
-	"github.com/alecthomas/hcl"
+	"github.com/alecthomas/hcl/v2"
 )
 
 var registry = map[string]func(config *hcl.Block) (Strategy, error){}
