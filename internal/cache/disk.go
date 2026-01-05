@@ -267,7 +267,7 @@ func (d *Disk) evict() error {
 
 	err := filepath.Walk(d.config.Root, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return errors.WithStack(err)
 		}
 		if info.IsDir() {
 			return nil
@@ -275,7 +275,7 @@ func (d *Disk) evict() error {
 
 		relPath, err := filepath.Rel(d.config.Root, path)
 		if err != nil {
-			return err
+			return errors.WithStack(err)
 		}
 
 		expiresAtBytes, err := xattr.Get(path, expiresAtXAttr)
@@ -353,7 +353,7 @@ type diskWriter struct {
 func (w *diskWriter) Write(p []byte) (int, error) {
 	n, err := w.file.Write(p)
 	w.size += int64(n)
-	return n, err
+	return n, errors.WithStack(err)
 }
 
 func (w *diskWriter) Close() error {
