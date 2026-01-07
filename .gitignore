@@ -1,3 +1,2 @@
-# Added by goreleaser init:
-dist/
-cache/
+/dist/
+/cache/
