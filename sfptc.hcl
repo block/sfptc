@@ -2,7 +2,7 @@
 # strategy docker {}
 # strategy hermit {}
 # strategy artifactory {
-#   mitm = ["artifactory.global.square"]
+#   mitm = ["artifactory.square.com"]
 # }
 
 host "/github/" {

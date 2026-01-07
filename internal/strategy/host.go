@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 
@@ -70,9 +72,10 @@ func (d *Host) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	key := cache.NewKey(fullURL)
 
-	cr, err := d.cache.Open(r.Context(), key)
+	cr, headers, err := d.cache.Open(r.Context(), key)
 	if err == nil {
 		defer cr.Close()
+		maps.Copy(w.Header(), headers)
 		if _, err := io.Copy(w, cr); err != nil {
 			d.logger.Error("Failed to copy cached response", slog.String("error", err.Error()), slog.String("url", fullURL))
 		}
@@ -104,7 +107,8 @@ func (d *Host) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cw, err := d.cache.Create(r.Context(), key, 0)
+	responseHeaders := textproto.MIMEHeader(maps.Clone(resp.Header))
+	cw, err := d.cache.Create(r.Context(), key, responseHeaders, 0)
 	if err != nil {
 		d.httpError(w, http.StatusInternalServerError, err, "Failed to create cache entry", slog.String("url", fullURL))
 		return

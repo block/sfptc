@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"net/textproto"
 	"time"
 
 	"github.com/alecthomas/errors"
@@ -70,6 +71,21 @@ func (k *Key) MarshalText() ([]byte, error) {
 	return []byte(k.String()), nil
 }
 
+// FilterTransportHeaders returns a copy of the given headers with standard HTTP transport headers removed.
+// These headers are typically added by HTTP clients/servers and should not be cached.
+func FilterTransportHeaders(headers textproto.MIMEHeader) textproto.MIMEHeader {
+	filtered := make(textproto.MIMEHeader)
+	for key, values := range headers {
+		// Skip standard HTTP headers added by transport layer or that shouldn't be cached
+		if key == "Content-Length" || key == "Date" || key == "Accept-Encoding" ||
+			key == "User-Agent" || key == "Transfer-Encoding" || key == "Time-To-Live" {
+			continue
+		}
+		filtered[key] = values
+	}
+	return filtered
+}
+
 // A Cache knows how to retrieve, create and delete objects from a cache.
 type Cache interface {
 	// String describes the Cache implementation.
@@ -78,13 +94,13 @@ type Cache interface {
 	//
 	// Expired files SHOULD not be returned.
 	// Must return os.ErrNotExist if the file does not exist.
-	Open(ctx context.Context, key Key) (io.ReadCloser, error)
+	Open(ctx context.Context, key Key) (io.ReadCloser, textproto.MIMEHeader, error)
 	// Create a new file in the cache.
 	//
 	// If "ttl" is zero, a maximum TTL MUST be used by the implementation.
 	//
 	// The file MUST not be available for read until completely written and closed.
-	Create(ctx context.Context, key Key, ttl time.Duration) (io.WriteCloser, error)
+	Create(ctx context.Context, key Key, headers textproto.MIMEHeader, ttl time.Duration) (io.WriteCloser, error)
 	// Delete a file from the cache.
 	//
 	// MUST be atomic.

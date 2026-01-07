@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"sort"
@@ -122,7 +123,7 @@ func (d *Disk) Size() int64 {
 	return d.size.Load()
 }
 
-func (d *Disk) Create(_ context.Context, key Key, ttl time.Duration) (io.WriteCloser, error) {
+func (d *Disk) Create(_ context.Context, key Key, headers textproto.MIMEHeader, ttl time.Duration) (io.WriteCloser, error) {
 	if ttl > d.config.MaxTTL || ttl == 0 {
 		ttl = d.config.MaxTTL
 	}
@@ -150,6 +151,7 @@ func (d *Disk) Create(_ context.Context, key Key, ttl time.Duration) (io.WriteCl
 		path:      fullPath,
 		tempPath:  tempPath,
 		expiresAt: expiresAt,
+		headers:   headers,
 	}, nil
 }
 
@@ -159,7 +161,7 @@ func (d *Disk) Delete(_ context.Context, key Key) error {
 
 	// Check if file is expired
 	expired := false
-	expiresAt, err := d.ttl.get(key)
+	expiresAt, _, err := d.ttl.get(key)
 	if err == nil && time.Now().After(expiresAt) {
 		expired = true
 	}
@@ -186,34 +188,34 @@ func (d *Disk) Delete(_ context.Context, key Key) error {
 	return nil
 }
 
-func (d *Disk) Open(ctx context.Context, key Key) (io.ReadCloser, error) {
+func (d *Disk) Open(ctx context.Context, key Key) (io.ReadCloser, textproto.MIMEHeader, error) {
 	path := d.keyToPath(key)
 	fullPath := filepath.Join(d.config.Root, path)
 
 	f, err := os.Open(fullPath)
 	if err != nil {
-		return nil, errors.Errorf("failed to open file: %w", err)
+		return nil, nil, errors.Errorf("failed to open file: %w", err)
 	}
 
-	expiresAt, err := d.ttl.get(key)
+	expiresAt, headers, err := d.ttl.get(key)
 	if err != nil {
-		return nil, errors.Join(errors.Errorf("failed to get expiration time: %w", err), f.Close())
+		return nil, nil, errors.Join(errors.Errorf("failed to get metadata: %w", err), f.Close())
 	}
 
 	now := time.Now()
 	if now.After(expiresAt) {
-		return nil, errors.Join(fs.ErrNotExist, f.Close(), d.Delete(ctx, key))
+		return nil, nil, errors.Join(fs.ErrNotExist, f.Close(), d.Delete(ctx, key))
 	}
 
 	// Reset expiration time to implement LRU
 	ttl := min(expiresAt.Sub(now), d.config.MaxTTL)
 	newExpiresAt := now.Add(ttl)
 
-	if err := d.ttl.set(key, newExpiresAt); err != nil {
-		return nil, errors.Join(errors.Errorf("failed to update expiration time: %w", err), f.Close())
+	if err := d.ttl.set(key, newExpiresAt, headers); err != nil {
+		return nil, nil, errors.Join(errors.Errorf("failed to update expiration time: %w", err), f.Close())
 	}
 
-	return f, nil
+	return f, headers, nil
 }
 
 func (d *Disk) keyToPath(key Key) string {
@@ -330,6 +332,7 @@ type diskWriter struct {
 	path      string
 	tempPath  string
 	expiresAt time.Time
+	headers   textproto.MIMEHeader
 	size      int64
 }
 
@@ -348,8 +351,8 @@ func (w *diskWriter) Close() error {
 		return errors.Errorf("failed to rename temp file: %w", err)
 	}
 
-	if err := w.disk.ttl.set(w.key, w.expiresAt); err != nil {
-		return errors.Join(errors.Errorf("failed to set expiration time: %w", err), os.Remove(w.path))
+	if err := w.disk.ttl.set(w.key, w.expiresAt, w.headers); err != nil {
+		return errors.Join(errors.Errorf("failed to set metadata: %w", err), os.Remove(w.path))
 	}
 
 	w.disk.size.Add(w.size)
