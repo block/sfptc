@@ -3,6 +3,7 @@ package cache
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -12,10 +13,10 @@ import (
 )
 
 func init() {
-	Register("memory", NewMemoryCache)
+	Register("memory", NewMemory)
 }
 
-type MemoryCacheConfig struct {
+type MemoryConfig struct {
 	LimitMB int           `hcl:"limit-mb,optional" help:"Maximum size of the disk cache in megabytes (defaults to 1GB)." default:"1024"`
 	MaxTTL  time.Duration `hcl:"max-ttl,optional" help:"Maximum time-to-live for entries in the disk cache (defaults to 1 hour)." default:"1h"`
 }
@@ -25,21 +26,23 @@ type memoryEntry struct {
 	expiresAt time.Time
 }
 
-type memoryCache struct {
-	config      MemoryCacheConfig
+type Memory struct {
+	config      MemoryConfig
 	mu          sync.RWMutex
 	entries     map[Key]*memoryEntry
 	currentSize int64
 }
 
-func NewMemoryCache(_ context.Context, config MemoryCacheConfig) (Cache, error) {
-	return &memoryCache{
+func NewMemory(_ context.Context, config MemoryConfig) (*Memory, error) {
+	return &Memory{
 		config:  config,
 		entries: make(map[Key]*memoryEntry),
 	}, nil
 }
 
-func (m *memoryCache) Open(_ context.Context, key Key) (io.ReadCloser, error) {
+func (m *Memory) String() string { return fmt.Sprintf("memory:%dMB", m.config.LimitMB) }
+
+func (m *Memory) Open(_ context.Context, key Key) (io.ReadCloser, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -55,7 +58,7 @@ func (m *memoryCache) Open(_ context.Context, key Key) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(entry.data)), nil
 }
 
-func (m *memoryCache) Create(_ context.Context, key Key, ttl time.Duration) (io.WriteCloser, error) {
+func (m *Memory) Create(_ context.Context, key Key, ttl time.Duration) (io.WriteCloser, error) {
 	if ttl == 0 {
 		ttl = m.config.MaxTTL
 	}
@@ -70,7 +73,7 @@ func (m *memoryCache) Create(_ context.Context, key Key, ttl time.Duration) (io.
 	return writer, nil
 }
 
-func (m *memoryCache) Delete(_ context.Context, key Key) error {
+func (m *Memory) Delete(_ context.Context, key Key) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -83,7 +86,7 @@ func (m *memoryCache) Delete(_ context.Context, key Key) error {
 	return nil
 }
 
-func (m *memoryCache) Close() error {
+func (m *Memory) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -92,7 +95,7 @@ func (m *memoryCache) Close() error {
 }
 
 type memoryWriter struct {
-	cache     *memoryCache
+	cache     *Memory
 	key       Key
 	buf       *bytes.Buffer
 	expiresAt time.Time
@@ -142,7 +145,7 @@ func (w *memoryWriter) Close() error {
 	return nil
 }
 
-func (m *memoryCache) evictOldest(neededSpace int64) {
+func (m *Memory) evictOldest(neededSpace int64) {
 	type entryInfo struct {
 		key       Key
 		size      int64

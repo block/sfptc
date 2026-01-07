@@ -12,20 +12,33 @@ import (
 	"github.com/alecthomas/hcl/v2"
 )
 
-var registry = map[string]func(config *hcl.Block) (Cache, error){}
+// ErrNotFound is returned when a cache backend is not found.
+var ErrNotFound = errors.New("cache backend not found")
+
+var registry = map[string]func(ctx context.Context, config *hcl.Block) (Cache, error){}
 
 // Factory is a function that creates a new cache instance from the given hcl-tagged configuration struct.
 type Factory[Config any, C Cache] func(ctx context.Context, config Config) (C, error)
 
 // Register a cache factory function.
 func Register[Config any, C Cache](id string, factory Factory[Config, C]) {
-	registry[id] = func(config *hcl.Block) (Cache, error) {
+	registry[id] = func(ctx context.Context, config *hcl.Block) (Cache, error) {
 		var cfg Config
 		if err := hcl.UnmarshalBlock(config, &cfg); err != nil {
 			return nil, errors.WithStack(err)
 		}
-		return factory(context.Background(), cfg)
+		return factory(ctx, cfg)
 	}
+}
+
+// Create a new cache instance from the given name and configuration.
+//
+// Will return "ErrNotFound" if the cache backend is not found.
+func Create(ctx context.Context, name string, config *hcl.Block) (Cache, error) {
+	if factory, ok := registry[name]; ok {
+		return errors.WithStack2(factory(ctx, config))
+	}
+	return nil, errors.Errorf("%s: %w", name, ErrNotFound)
 }
 
 // Key represents a unique identifier for a cached object.
@@ -59,6 +72,8 @@ func (k *Key) MarshalText() ([]byte, error) {
 
 // A Cache knows how to retrieve, create and delete objects from a cache.
 type Cache interface {
+	// String describes the Cache implementation.
+	String() string
 	// Open an existing file in the cache.
 	//
 	// Expired files SHOULD not be returned.

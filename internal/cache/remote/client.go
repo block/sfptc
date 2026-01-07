@@ -29,6 +29,8 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
+func (c *Client) String() string { return "remote:" + c.baseURL }
+
 // Open retrieves an object from the remote cache.
 func (c *Client) Open(ctx context.Context, key cache.Key) (io.ReadCloser, error) {
 	url := fmt.Sprintf("%s/%s", c.baseURL, key.String())
