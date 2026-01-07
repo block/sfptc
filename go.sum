@@ -1,9 +1,9 @@
 github.com/alecthomas/assert/v2 v2.11.0 h1:2Q9r3ki8+JYXvGsDyBXwH3LcJ+WK5D0gc5E8vS6K3D0=
 github.com/alecthomas/assert/v2 v2.11.0/go.mod h1:Bze95FyfUr7x34QZrjL+XP+0qgp/zg8yS+TtBj1WA3k=
-github.com/alecthomas/errors v0.8.3 h1:IPyQj2fU3GGsl6C/r4OPmYgqgNSDLWJLE/ln2fLjwas=
-github.com/alecthomas/errors v0.8.3/go.mod h1:l8mjMEHMGUdIWPMNtvDyRYPVS1fQFXHFXc/iVCCLGkI=
-github.com/alecthomas/hcl/v2 v2.3.0 h1:voBoBfb69MBRFkJ5NyMN/cSFfevVZKJIoxwfuJ1j2gU=
-github.com/alecthomas/hcl/v2 v2.3.0/go.mod h1:4UUp66q8ony5j8tm2bANErujUpZ3GgHBLgaKxTUQlQI=
+github.com/alecthomas/errors v0.9.1 h1:JNXtU30rtMNARCkW41OTZ4yL6Lyocq20xIJgIw2raqI=
+github.com/alecthomas/errors v0.9.1/go.mod h1:l8mjMEHMGUdIWPMNtvDyRYPVS1fQFXHFXc/iVCCLGkI=
+github.com/alecthomas/hcl/v2 v2.3.1 h1:Nkj0svGJawz920nQyWUhD2PYmD47p7BB9vc2e3kft1o=
+github.com/alecthomas/hcl/v2 v2.3.1/go.mod h1:4UUp66q8ony5j8tm2bANErujUpZ3GgHBLgaKxTUQlQI=
 github.com/alecthomas/kong v1.13.0 h1:5e/7XC3ugvhP1DQBmTS+WuHtCbcv44hsohMgcvVxSrA=
 github.com/alecthomas/kong v1.13.0/go.mod h1:wrlbXem1CWqUV5Vbmss5ISYhsVPkBb1Yo7YKJghju2I=
 github.com/alecthomas/participle/v2 v2.1.4 h1:W/H79S8Sat/krZ3el6sQMvMaahJ+XcM9WSI2naI7w2U=

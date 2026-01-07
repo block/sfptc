@@ -7,23 +7,39 @@ import (
 
 	"github.com/alecthomas/errors"
 	"github.com/alecthomas/hcl/v2"
+
+	"github.com/block/sfptc/internal/cache"
 )
 
-var registry = map[string]func(config *hcl.Block) (Strategy, error){}
+// ErrNotFound is returned when a strategy is not found.
+var ErrNotFound = errors.New("strategy not found")
 
-type Factory[Config any] func(ctx context.Context, config Config) (Strategy, error)
+var registry = map[string]func(ctx context.Context, config *hcl.Block, cache cache.Cache) (Strategy, error){}
 
-// Register a new caching strategy.
-func Register[Config any](id string, factory Factory[Config]) {
-	registry[id] = func(config *hcl.Block) (Strategy, error) {
+type Factory[Config any, S Strategy] func(ctx context.Context, config Config, cache cache.Cache) (S, error)
+
+// Register a new proxy strategy.
+func Register[Config any, S Strategy](id string, factory Factory[Config, S]) {
+	registry[id] = func(ctx context.Context, config *hcl.Block, cache cache.Cache) (Strategy, error) {
 		var cfg Config
-		if err := hcl.UnmarshalBlock(config, &cfg); err != nil {
+		if err := hcl.UnmarshalBlock(config, &cfg, hcl.AllowExtra(false)); err != nil {
 			return nil, errors.WithStack(err)
 		}
-		return factory(context.Background(), cfg)
+		return factory(ctx, cfg, cache)
 	}
 }
 
+// Create a new proxy strategy.
+//
+// Will return "ErrNotFound" if the strategy is not found.
+func Create(ctx context.Context, name string, config *hcl.Block, cache cache.Cache) (Strategy, error) {
+	if factory, ok := registry[name]; ok {
+		return errors.WithStack2(factory(ctx, config, cache))
+	}
+	return nil, errors.Errorf("%s: %w", name, ErrNotFound)
+}
+
 type Strategy interface {
-	Register(mux *http.ServeMux)
+	String() string
+	http.Handler
 }

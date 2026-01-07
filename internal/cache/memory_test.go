@@ -13,7 +13,7 @@ import (
 func TestMemoryCache(t *testing.T) {
 	cachetest.Suite(t, func(t *testing.T) cache.Cache {
 		ctx := t.Context()
-		c, err := cache.NewMemoryCache(ctx, cache.MemoryCacheConfig{MaxTTL: 100 * time.Millisecond})
+		c, err := cache.NewMemory(ctx, cache.MemoryConfig{MaxTTL: 100 * time.Millisecond})
 		assert.NoError(t, err)
 		return c
 	})

@@ -112,6 +112,8 @@ func NewDisk(ctx context.Context, config DiskConfig) (*Disk, error) {
 	return disk, nil
 }
 
+func (d *Disk) String() string { return "disk:" + d.config.Root }
+
 func (d *Disk) Close() error {
 	d.stop()
 	return nil
