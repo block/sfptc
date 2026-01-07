@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
+	"net/textproto"
 	"os"
 	"time"
 
@@ -55,7 +57,7 @@ func (d *Default) getObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cr, err := d.cache.Open(r.Context(), key)
+	cr, headers, err := d.cache.Open(r.Context(), key)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			d.httpError(w, http.StatusNotFound, err, "Cache object not found", slog.String("key", key.String()))
@@ -64,6 +66,8 @@ func (d *Default) getObject(w http.ResponseWriter, r *http.Request) {
 		d.httpError(w, http.StatusInternalServerError, err, "Failed to open cache object", slog.String("key", key.String()))
 		return
 	}
+
+	maps.Copy(w.Header(), headers)
 
 	_, err = io.Copy(w, cr)
 	if err != nil {
@@ -91,7 +95,10 @@ func (d *Default) putObject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cw, err := d.cache.Create(r.Context(), key, ttl)
+	// Extract and filter headers from request
+	headers := cache.FilterTransportHeaders(textproto.MIMEHeader(r.Header))
+
+	cw, err := d.cache.Create(r.Context(), key, headers, ttl)
 	if err != nil {
 		d.httpError(w, http.StatusInternalServerError, err, "Failed to create cache writer", slog.String("key", key.String()))
 		return

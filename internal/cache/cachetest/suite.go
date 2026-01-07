@@ -2,6 +2,7 @@ package cachetest
 
 import (
 	"io"
+	"net/textproto"
 	"os"
 	"testing"
 	"time"
@@ -41,6 +42,10 @@ func Suite(t *testing.T, newCache func(t *testing.T) cache.Cache) {
 	t.Run("NotAvailableUntilClosed", func(t *testing.T) {
 		testNotAvailableUntilClosed(t, newCache(t))
 	})
+
+	t.Run("Headers", func(t *testing.T) {
+		testHeaders(t, newCache(t))
+	})
 }
 
 func testCreateAndOpen(t *testing.T, c cache.Cache) {
@@ -49,7 +54,7 @@ func testCreateAndOpen(t *testing.T, c cache.Cache) {
 
 	key := cache.NewKey("test-key")
 
-	writer, err := c.Create(ctx, key, time.Hour)
+	writer, err := c.Create(ctx, key, nil, time.Hour)
 	assert.NoError(t, err)
 
 	_, err = writer.Write([]byte("hello world"))
@@ -58,7 +63,7 @@ func testCreateAndOpen(t *testing.T, c cache.Cache) {
 	err = writer.Close()
 	assert.NoError(t, err)
 
-	reader, err := c.Open(ctx, key)
+	reader, _, err := c.Open(ctx, key)
 	assert.NoError(t, err)
 	defer reader.Close()
 
@@ -73,7 +78,7 @@ func testNotFound(t *testing.T, c cache.Cache) {
 
 	key := cache.NewKey("nonexistent")
 
-	_, err := c.Open(ctx, key)
+	_, _, err := c.Open(ctx, key)
 	assert.IsError(t, err, os.ErrNotExist)
 }
 
@@ -83,7 +88,7 @@ func testExpiration(t *testing.T, c cache.Cache) {
 
 	key := cache.NewKey("test-key")
 
-	writer, err := c.Create(ctx, key, 10*time.Millisecond)
+	writer, err := c.Create(ctx, key, nil, 10*time.Millisecond)
 	assert.NoError(t, err)
 
 	_, err = writer.Write([]byte("test data"))
@@ -92,13 +97,13 @@ func testExpiration(t *testing.T, c cache.Cache) {
 	err = writer.Close()
 	assert.NoError(t, err)
 
-	reader, err := c.Open(ctx, key)
+	reader, _, err := c.Open(ctx, key)
 	assert.NoError(t, err)
 	assert.NoError(t, reader.Close())
 
 	time.Sleep(20 * time.Millisecond)
 
-	_, err = c.Open(ctx, key)
+	_, _, err = c.Open(ctx, key)
 	assert.IsError(t, err, os.ErrNotExist)
 }
 
@@ -108,7 +113,7 @@ func testDefaultTTL(t *testing.T, c cache.Cache) {
 
 	key := cache.NewKey("test-key")
 
-	writer, err := c.Create(ctx, key, 0)
+	writer, err := c.Create(ctx, key, nil, 0)
 	assert.NoError(t, err)
 
 	_, err = writer.Write([]byte("test data"))
@@ -117,7 +122,7 @@ func testDefaultTTL(t *testing.T, c cache.Cache) {
 	err = writer.Close()
 	assert.NoError(t, err)
 
-	reader, err := c.Open(ctx, key)
+	reader, _, err := c.Open(ctx, key)
 	assert.NoError(t, err)
 	assert.NoError(t, reader.Close())
 }
@@ -128,7 +133,7 @@ func testDelete(t *testing.T, c cache.Cache) {
 
 	key := cache.NewKey("test-key")
 
-	writer, err := c.Create(ctx, key, time.Hour)
+	writer, err := c.Create(ctx, key, nil, time.Hour)
 	assert.NoError(t, err)
 
 	_, err = writer.Write([]byte("test data"))
@@ -140,7 +145,7 @@ func testDelete(t *testing.T, c cache.Cache) {
 	err = c.Delete(ctx, key)
 	assert.NoError(t, err)
 
-	_, err = c.Open(ctx, key)
+	_, _, err = c.Open(ctx, key)
 	assert.IsError(t, err, os.ErrNotExist)
 }
 
@@ -150,7 +155,7 @@ func testMultipleWrites(t *testing.T, c cache.Cache) {
 
 	key := cache.NewKey("test-key")
 
-	writer, err := c.Create(ctx, key, time.Hour)
+	writer, err := c.Create(ctx, key, nil, time.Hour)
 	assert.NoError(t, err)
 
 	_, err = writer.Write([]byte("hello "))
@@ -162,7 +167,7 @@ func testMultipleWrites(t *testing.T, c cache.Cache) {
 	err = writer.Close()
 	assert.NoError(t, err)
 
-	reader, err := c.Open(ctx, key)
+	reader, _, err := c.Open(ctx, key)
 	assert.NoError(t, err)
 	defer reader.Close()
 
@@ -177,18 +182,54 @@ func testNotAvailableUntilClosed(t *testing.T, c cache.Cache) {
 
 	key := cache.NewKey("test-key")
 
-	writer, err := c.Create(ctx, key, time.Hour)
+	writer, err := c.Create(ctx, key, nil, time.Hour)
 	assert.NoError(t, err)
 
 	_, err = writer.Write([]byte("test data"))
 	assert.NoError(t, err)
 
-	_, err = c.Open(ctx, key)
+	_, _, err = c.Open(ctx, key)
 	assert.IsError(t, err, os.ErrNotExist)
 
 	err = writer.Close()
 	assert.NoError(t, err)
 
-	_, err = c.Open(ctx, key)
+	_, _, err = c.Open(ctx, key)
 	assert.NoError(t, err)
+}
+
+func testHeaders(t *testing.T, c cache.Cache) {
+	defer c.Close()
+	ctx := t.Context()
+
+	key := cache.NewKey("test-key-with-headers")
+
+	// Create headers to store
+	headers := textproto.MIMEHeader{
+		"Content-Type":   []string{"application/json"},
+		"Cache-Control":  []string{"max-age=3600"},
+		"X-Custom-Field": []string{"custom-value"},
+	}
+
+	writer, err := c.Create(ctx, key, headers, time.Hour)
+	assert.NoError(t, err)
+
+	_, err = writer.Write([]byte("test data with headers"))
+	assert.NoError(t, err)
+
+	err = writer.Close()
+	assert.NoError(t, err)
+
+	// Open and verify headers are returned
+	reader, returnedHeaders, err := c.Open(ctx, key)
+	assert.NoError(t, err)
+	defer reader.Close()
+
+	// Verify the data
+	data, err := io.ReadAll(reader)
+	assert.NoError(t, err)
+	assert.Equal(t, "test data with headers", string(data))
+
+	// Verify headers
+	assert.Equal(t, headers, returnedHeaders)
 }

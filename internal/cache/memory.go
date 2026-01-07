@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/textproto"
 	"os"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ type MemoryConfig struct {
 type memoryEntry struct {
 	data      []byte
 	expiresAt time.Time
+	headers   textproto.MIMEHeader
 }
 
 type Memory struct {
@@ -42,23 +44,23 @@ func NewMemory(_ context.Context, config MemoryConfig) (*Memory, error) {
 
 func (m *Memory) String() string { return fmt.Sprintf("memory:%dMB", m.config.LimitMB) }
 
-func (m *Memory) Open(_ context.Context, key Key) (io.ReadCloser, error) {
+func (m *Memory) Open(_ context.Context, key Key) (io.ReadCloser, textproto.MIMEHeader, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	entry, exists := m.entries[key]
 	if !exists {
-		return nil, os.ErrNotExist
+		return nil, nil, os.ErrNotExist
 	}
 
 	if time.Now().After(entry.expiresAt) {
-		return nil, os.ErrNotExist
+		return nil, nil, os.ErrNotExist
 	}
 
-	return io.NopCloser(bytes.NewReader(entry.data)), nil
+	return io.NopCloser(bytes.NewReader(entry.data)), entry.headers, nil
 }
 
-func (m *Memory) Create(_ context.Context, key Key, ttl time.Duration) (io.WriteCloser, error) {
+func (m *Memory) Create(_ context.Context, key Key, headers textproto.MIMEHeader, ttl time.Duration) (io.WriteCloser, error) {
 	if ttl == 0 {
 		ttl = m.config.MaxTTL
 	}
@@ -68,6 +70,7 @@ func (m *Memory) Create(_ context.Context, key Key, ttl time.Duration) (io.Write
 		key:       key,
 		buf:       &bytes.Buffer{},
 		expiresAt: time.Now().Add(ttl),
+		headers:   headers,
 	}
 
 	return writer, nil
@@ -99,6 +102,7 @@ type memoryWriter struct {
 	key       Key
 	buf       *bytes.Buffer
 	expiresAt time.Time
+	headers   textproto.MIMEHeader
 	closed    bool
 }
 
@@ -139,6 +143,7 @@ func (w *memoryWriter) Close() error {
 	w.cache.entries[w.key] = &memoryEntry{
 		data:      w.buf.Bytes(),
 		expiresAt: w.expiresAt,
+		headers:   w.headers,
 	}
 	w.cache.currentSize += newSize
 

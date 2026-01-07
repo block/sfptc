@@ -72,7 +72,7 @@ func TestHostNonOKStatus(t *testing.T) {
 	assert.Equal(t, "not found", w.Body.String())
 
 	key := cache.NewKey(backend.URL + "/missing")
-	_, err = memCache.Open(context.Background(), key)
+	_, _, err = memCache.Open(context.Background(), key)
 	assert.Error(t, err, "non-OK responses should not be cached")
 }
 

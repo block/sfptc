@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"net/textproto"
 	"os"
 	"time"
 
@@ -32,31 +34,34 @@ func NewClient(baseURL string) *Client {
 func (c *Client) String() string { return "remote:" + c.baseURL }
 
 // Open retrieves an object from the remote cache.
-func (c *Client) Open(ctx context.Context, key cache.Key) (io.ReadCloser, error) {
+func (c *Client) Open(ctx context.Context, key cache.Key) (io.ReadCloser, textproto.MIMEHeader, error) {
 	url := fmt.Sprintf("%s/%s", c.baseURL, key.String())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create request")
+		return nil, nil, errors.Wrap(err, "failed to create request")
 	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to execute request")
+		return nil, nil, errors.Wrap(err, "failed to execute request")
 	}
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, errors.Join(os.ErrNotExist, resp.Body.Close())
+		return nil, nil, errors.Join(os.ErrNotExist, resp.Body.Close())
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.Join(errors.Errorf("unexpected status code: %d", resp.StatusCode), resp.Body.Close())
+		return nil, nil, errors.Join(errors.Errorf("unexpected status code: %d", resp.StatusCode), resp.Body.Close())
 	}
 
-	return resp.Body, nil
+	// Filter out HTTP transport headers
+	headers := cache.FilterTransportHeaders(textproto.MIMEHeader(resp.Header))
+
+	return resp.Body, headers, nil
 }
 
 // Create stores a new object in the remote cache.
-func (c *Client) Create(ctx context.Context, key cache.Key, ttl time.Duration) (io.WriteCloser, error) {
+func (c *Client) Create(ctx context.Context, key cache.Key, headers textproto.MIMEHeader, ttl time.Duration) (io.WriteCloser, error) {
 	pr, pw := io.Pipe()
 
 	url := fmt.Sprintf("%s/%s", c.baseURL, key.String())
@@ -64,6 +69,8 @@ func (c *Client) Create(ctx context.Context, key cache.Key, ttl time.Duration) (
 	if err != nil {
 		return nil, errors.Join(errors.Wrap(err, "failed to create request"), pr.Close(), pw.Close())
 	}
+
+	maps.Copy(req.Header, headers)
 
 	if ttl > 0 {
 		req.Header.Set("Time-To-Live", ttl.String())
