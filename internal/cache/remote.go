@@ -24,7 +24,7 @@ var _ Cache = (*Remote)(nil)
 // NewRemote creates a new remote cache client.
 func NewRemote(baseURL string) *Remote {
 	return &Remote{
-		baseURL: baseURL,
+		baseURL: baseURL + "/api/v1/object",
 		client:  &http.Client{},
 	}
 }

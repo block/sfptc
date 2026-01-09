@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -24,9 +25,10 @@ func TestRemoteClient(t *testing.T) {
 		assert.NoError(t, err)
 		t.Cleanup(func() { memCache.Close() })
 
-		server, err := strategy.NewDefault(ctx, strategy.DefaultConfig{}, memCache)
+		mux := http.NewServeMux()
+		_, err = strategy.NewAPIV1(ctx, struct{}{}, memCache, mux)
 		assert.NoError(t, err)
-		ts := httptest.NewServer(server)
+		ts := httptest.NewServer(mux)
 		t.Cleanup(ts.Close)
 
 		client := cache.NewRemote(ts.URL)

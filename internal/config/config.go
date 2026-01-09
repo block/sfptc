@@ -4,8 +4,9 @@ package config
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
-	"strings"
+	"os"
 
 	"github.com/alecthomas/errors"
 	"github.com/alecthomas/hcl/v2"
@@ -15,17 +16,36 @@ import (
 	"github.com/block/sfptc/internal/strategy"
 )
 
+type loggingMux struct {
+	logger *slog.Logger
+	mux    *http.ServeMux
+}
+
+func (l *loggingMux) Handle(pattern string, handler http.Handler) {
+	l.logger.Debug("Registered strategy handler", "pattern", pattern)
+	l.mux.Handle(pattern, handler)
+}
+
+func (l *loggingMux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	l.logger.Debug("Registered strategy handler", "pattern", pattern)
+	l.mux.HandleFunc(pattern, handler)
+}
+
+var _ strategy.Mux = (*loggingMux)(nil)
+
 // Load HCL configuration and uses that to construct the cache backend, and proxy strategies.
-func Load(ctx context.Context, r io.Reader, mux *http.ServeMux) error {
+func Load(ctx context.Context, r io.Reader, mux *http.ServeMux, vars map[string]string) error {
 	logger := logging.FromContext(ctx)
 	ast, err := hcl.Parse(r)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
+	expandVars(ast, vars)
+
 	strategyCandidates := []*hcl.Block{
-		// Always enable the default strategy
-		{Name: "default", Labels: []string{"/api/v1/"}},
+		// Always enable the default API strategy
+		{Name: "apiv1"},
 	}
 
 	// First pass, instantiate caches
@@ -56,19 +76,27 @@ func Load(ctx context.Context, r io.Reader, mux *http.ServeMux) error {
 
 	// Second pass, instantiate strategies and bind them to the mux.
 	for _, block := range strategyCandidates {
-		if len(block.Labels) != 1 {
-			return errors.Errorf("%s: block must have exactly one label defining the server mount point", block.Pos)
-		}
-		pattern := block.Labels[0]
-		block.Labels = nil
-		s, err := strategy.Create(ctx, block.Name, block, cache)
+		logger := logger.With("strategy", block.Name)
+		mlog := &loggingMux{logger: logger, mux: mux}
+		_, err := strategy.Create(ctx, block.Name, block, cache, mlog)
 		if err != nil {
 			return errors.Errorf("%s: %w", block.Pos, err)
 		}
-
-		logger.DebugContext(ctx, "Adding strategy", "strategy", s, "pattern", pattern)
-
-		mux.Handle(pattern, http.StripPrefix(strings.TrimSuffix(pattern, "/"), s))
 	}
 	return nil
+}
+
+func expandVars(ast *hcl.AST, vars map[string]string) {
+	_ = hcl.Visit(ast, func(node hcl.Node, next func() error) error {
+		attr, ok := node.(*hcl.Attribute)
+		if ok {
+			switch attr := attr.Value.(type) {
+			case *hcl.String:
+				attr.Str = os.Expand(attr.Str, func(s string) string { return vars[s] })
+			case *hcl.Heredoc:
+				attr.Doc = os.Expand(attr.Doc, func(s string) string { return vars[s] })
+			}
+		}
+		return next()
+	})
 }

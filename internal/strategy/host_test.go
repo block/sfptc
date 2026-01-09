@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -29,20 +30,25 @@ func TestHostCaching(t *testing.T) {
 	assert.NoError(t, err)
 	defer memCache.Close()
 
-	host, err := strategy.NewHost(ctx, strategy.HostConfig{Target: backend.URL}, memCache)
+	mux := http.NewServeMux()
+	_, err = strategy.NewHost(ctx, strategy.HostConfig{Target: backend.URL}, memCache, mux)
 	assert.NoError(t, err)
 
-	req1 := httptest.NewRequest(http.MethodGet, "/test", nil)
+	// Request path must include the host prefix from the target URL
+	u, _ := url.Parse(backend.URL)
+	reqPath := "/" + u.Host + "/test"
+
+	req1 := httptest.NewRequest(http.MethodGet, reqPath, nil)
 	w1 := httptest.NewRecorder()
-	host.ServeHTTP(w1, req1)
+	mux.ServeHTTP(w1, req1)
 
 	assert.Equal(t, http.StatusOK, w1.Code)
 	assert.Equal(t, "response", w1.Body.String())
 	assert.Equal(t, 1, callCount)
 
-	req2 := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req2 := httptest.NewRequest(http.MethodGet, reqPath, nil)
 	w2 := httptest.NewRecorder()
-	host.ServeHTTP(w2, req2)
+	mux.ServeHTTP(w2, req2)
 
 	assert.Equal(t, http.StatusOK, w2.Code)
 	assert.Equal(t, "response", w2.Body.String())
@@ -61,12 +67,17 @@ func TestHostNonOKStatus(t *testing.T) {
 	assert.NoError(t, err)
 	defer memCache.Close()
 
-	host, err := strategy.NewHost(ctx, strategy.HostConfig{Target: backend.URL}, memCache)
+	mux := http.NewServeMux()
+	_, err = strategy.NewHost(ctx, strategy.HostConfig{Target: backend.URL}, memCache, mux)
 	assert.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	// Request path must include the host prefix from the target URL
+	u, _ := url.Parse(backend.URL)
+	reqPath := "/" + u.Host + "/missing"
+
+	req := httptest.NewRequest(http.MethodGet, reqPath, nil)
 	w := httptest.NewRecorder()
-	host.ServeHTTP(w, req)
+	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Equal(t, "not found", w.Body.String())
@@ -82,7 +93,8 @@ func TestHostInvalidTargetURL(t *testing.T) {
 	assert.NoError(t, err)
 	defer memCache.Close()
 
-	_, err = strategy.NewHost(ctx, strategy.HostConfig{Target: "://invalid"}, memCache)
+	mux := http.NewServeMux()
+	_, err = strategy.NewHost(ctx, strategy.HostConfig{Target: "://invalid"}, memCache, mux)
 	assert.Error(t, err)
 }
 
@@ -92,7 +104,8 @@ func TestHostString(t *testing.T) {
 	assert.NoError(t, err)
 	defer memCache.Close()
 
-	host, err := strategy.NewHost(ctx, strategy.HostConfig{Target: "https://example.com/prefix"}, memCache)
+	mux := http.NewServeMux()
+	host, err := strategy.NewHost(ctx, strategy.HostConfig{Target: "https://example.com/prefix"}, memCache, mux)
 	assert.NoError(t, err)
 
 	assert.Equal(t, "host:example.com/prefix", host.String())

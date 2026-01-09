@@ -458,6 +458,8 @@ linters:
         linters: [revive, staticcheck]
       - text: 'shadow: declaration of "err" shadows declaration'
         linters: ["govet"]
+      - text: 'shadow: declaration of "logger" shadows declaration'
+        linters: ["govet"]
       - path: '_test\.go'
         linters:
           - bodyclose
