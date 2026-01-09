@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -9,23 +8,9 @@ import (
 	"os"
 
 	"github.com/alecthomas/errors"
+
+	"github.com/block/sfptc/internal/httputil"
 )
-
-type HTTPError struct {
-	status int
-	err    error
-}
-
-func (h HTTPError) Error() string   { return fmt.Sprintf("%d: %s", h.status, h.err) }
-func (h HTTPError) Unwrap() error   { return h.err }
-func (h HTTPError) StatusCode() int { return h.status }
-
-func HTTPErrorf(status int, format string, args ...any) error {
-	return HTTPError{
-		status: status,
-		err:    errors.Errorf(format, args...),
-	}
-}
 
 // Fetch retrieves a response from cache or fetches from the request URL and caches it.
 // The response is streamed without buffering. Returns HTTPError for semantic errors.
@@ -49,12 +34,19 @@ func Fetch(client *http.Client, r *http.Request, c Cache) (*http.Response, error
 		}, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return nil, HTTPErrorf(http.StatusInternalServerError, "failed to open cache: %w", err)
+		return nil, httputil.Errorf(http.StatusInternalServerError, "failed to open cache: %w", err)
 	}
 
+	return FetchDirect(client, r, c, key)
+}
+
+// FetchDirect fetches and caches the given URL without checking the cache first.
+// The response is streamed without buffering. Returns HTTPError for semantic errors.
+// The caller must close the response body.
+func FetchDirect(client *http.Client, r *http.Request, c Cache, key Key) (*http.Response, error) {
 	resp, err := client.Do(r) //nolint:bodyclose // Body is returned to caller
 	if err != nil {
-		return nil, HTTPErrorf(http.StatusBadGateway, "failed to fetch: %w", err)
+		return nil, httputil.Errorf(http.StatusBadGateway, "failed to fetch: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -65,7 +57,7 @@ func Fetch(client *http.Client, r *http.Request, c Cache) (*http.Response, error
 	cw, err := c.Create(r.Context(), key, responseHeaders, 0)
 	if err != nil {
 		_ = resp.Body.Close()
-		return nil, HTTPErrorf(http.StatusInternalServerError, "failed to create cache entry: %w", err)
+		return nil, httputil.Errorf(http.StatusInternalServerError, "failed to create cache entry: %w", err)
 	}
 
 	originalBody := resp.Body

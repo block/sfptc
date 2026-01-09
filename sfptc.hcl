@@ -5,8 +5,11 @@
 #   mitm = ["artifactory.square.com"]
 # }
 
-host "/github/" {
-  target = "https://github.com/"
+host "https://w3.org" {}
+
+github-releases {
+  token = "${GITHUB_TOKEN}"
+  private-orgs = ["alecthomas"]
 }
 
 disk {

@@ -3,42 +3,62 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
 
 	"github.com/block/sfptc/internal/config"
+	"github.com/block/sfptc/internal/httputil"
 	"github.com/block/sfptc/internal/logging"
 )
 
 var cli struct {
-	Config        *os.File       `hcl:"-" help:"Configuration file path." placeholder:"PATH" required:""`
+	Config        *os.File       `hcl:"-" help:"Configuration file path." placeholder:"PATH" required:"" default:"sfptc.hcl"`
 	Bind          string         `hcl:"bind" default:"127.0.0.1:8080" help:"Bind address for the server."`
 	LoggingConfig logging.Config `embed:"" prefix:"log-"`
 }
 
 func main() {
-	kctx := kong.Parse(&cli)
+	kctx := kong.Parse(&cli, kong.DefaultEnvars("SFPTC"))
 
 	ctx := context.Background()
 	logger, ctx := logging.Configure(ctx, cli.LoggingConfig)
 
 	mux := http.NewServeMux()
 
-	err := config.Load(ctx, cli.Config, mux)
+	err := config.Load(ctx, cli.Config, mux, parseEnvars())
 	kctx.FatalIfErrorf(err)
 
 	logger.InfoContext(ctx, "Starting sfptcd", slog.String("bind", cli.Bind))
 
 	server := &http.Server{
 		Addr:              cli.Bind,
-		Handler:           mux,
+		Handler:           httputil.LoggingMiddleware(mux),
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(net.Listener) context.Context {
+			return ctx
+		},
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			return logging.ContextWithLogger(ctx, logger.With("client", c.RemoteAddr().String()))
+		},
 	}
+
 	err = server.ListenAndServe()
 	kctx.FatalIfErrorf(err)
+}
+
+func parseEnvars() map[string]string {
+	envars := map[string]string{}
+	for _, env := range os.Environ() {
+		if key, value, ok := strings.Cut(env, "="); ok {
+			envars[key] = value
+		}
+	}
+	return envars
 }

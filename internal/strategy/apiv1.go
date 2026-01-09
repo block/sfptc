@@ -16,41 +16,31 @@ import (
 )
 
 func init() {
-	Register("default", NewDefault)
+	Register("apiv1", NewAPIV1)
 }
 
-type DefaultConfig struct{}
+var _ Strategy = (*APIV1)(nil)
 
-var _ Strategy = (*Default)(nil)
-
-// The Default strategy represents v1 of the proxy API.
-type Default struct {
+// The APIV1 strategy represents v1 of the proxy API.
+type APIV1 struct {
 	cache  cache.Cache
 	logger *slog.Logger
-	mux    *http.ServeMux
 }
 
-var _ http.Handler = (*Default)(nil)
-
-func NewDefault(ctx context.Context, _ DefaultConfig, cache cache.Cache) (*Default, error) {
-	s := &Default{
+func NewAPIV1(ctx context.Context, _ struct{}, cache cache.Cache, mux Mux) (*APIV1, error) {
+	s := &APIV1{
 		logger: logging.FromContext(ctx),
 		cache:  cache,
-		mux:    http.NewServeMux(),
 	}
-	s.mux.Handle("GET /{key}", http.HandlerFunc(s.getObject))
-	s.mux.Handle("POST /{key}", http.HandlerFunc(s.putObject))
-	s.mux.Handle("DELETE /{key}", http.HandlerFunc(s.deleteObject))
+	mux.Handle("GET /api/v1/object/{key}", http.HandlerFunc(s.getObject))
+	mux.Handle("POST /api/v1/object/{key}", http.HandlerFunc(s.putObject))
+	mux.Handle("DELETE /api/v1/object/{key}", http.HandlerFunc(s.deleteObject))
 	return s, nil
 }
 
-func (d *Default) String() string { return "default" }
+func (d *APIV1) String() string { return "default" }
 
-func (d *Default) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	d.mux.ServeHTTP(w, r)
-}
-
-func (d *Default) getObject(w http.ResponseWriter, r *http.Request) {
+func (d *APIV1) getObject(w http.ResponseWriter, r *http.Request) {
 	key, err := cache.ParseKey(r.PathValue("key"))
 	if err != nil {
 		d.httpError(w, http.StatusBadRequest, err, "Invalid key")
@@ -78,7 +68,7 @@ func (d *Default) getObject(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (d *Default) putObject(w http.ResponseWriter, r *http.Request) {
+func (d *APIV1) putObject(w http.ResponseWriter, r *http.Request) {
 	key, err := cache.ParseKey(r.PathValue("key"))
 	if err != nil {
 		d.httpError(w, http.StatusBadRequest, err, "Invalid key")
@@ -115,7 +105,7 @@ func (d *Default) putObject(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (d *Default) deleteObject(w http.ResponseWriter, r *http.Request) {
+func (d *APIV1) deleteObject(w http.ResponseWriter, r *http.Request) {
 	key, err := cache.ParseKey(r.PathValue("key"))
 	if err != nil {
 		d.httpError(w, http.StatusBadRequest, err, "Invalid key")
@@ -133,7 +123,7 @@ func (d *Default) deleteObject(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (d *Default) httpError(w http.ResponseWriter, code int, err error, message string, args ...any) {
+func (d *APIV1) httpError(w http.ResponseWriter, code int, err error, message string, args ...any) {
 	args = append(args, slog.String("error", err.Error()))
 	d.logger.Error(message, args...)
 	http.Error(w, message, code)

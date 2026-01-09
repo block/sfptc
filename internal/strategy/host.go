@@ -12,6 +12,7 @@ import (
 	"github.com/alecthomas/errors"
 
 	"github.com/block/sfptc/internal/cache"
+	"github.com/block/sfptc/internal/httputil"
 	"github.com/block/sfptc/internal/logging"
 )
 
@@ -23,13 +24,13 @@ func init() {
 //
 // In HCL it looks something like this:
 //
-//	host "/github/" {
+//	host {
 //		target = "https://github.com/"
 //	}
 //
-// In this example, the strategy will be mounted under "/github".
+// In this example, the strategy will be mounted under "/github.com".
 type HostConfig struct {
-	Target string `hcl:"target" help:"The target URL to proxy requests to."`
+	Target string `hcl:"target,label" help:"The target URL to proxy requests to."`
 }
 
 // The Host [Strategy] forwards all GET requests to the specified host, caching the response payloads.
@@ -38,48 +39,66 @@ type Host struct {
 	cache  cache.Cache
 	client *http.Client
 	logger *slog.Logger
+	prefix string
 }
 
 var _ Strategy = (*Host)(nil)
 
-func NewHost(ctx context.Context, config HostConfig, cache cache.Cache) (*Host, error) {
+func NewHost(ctx context.Context, config HostConfig, cache cache.Cache, mux Mux) (*Host, error) {
 	u, err := url.Parse(config.Target)
 	if err != nil {
 		return nil, fmt.Errorf("invalid target URL: %w", err)
 	}
-	return &Host{
+	prefix := "/" + u.Host + u.EscapedPath()
+	h := &Host{
 		target: u,
 		cache:  cache,
 		client: &http.Client{},
 		logger: logging.FromContext(ctx),
-	}, nil
+		prefix: prefix,
+	}
+	mux.HandleFunc("GET "+prefix+"/", h.serveHTTP)
+	return h, nil
 }
 
 func (d *Host) String() string { return "host:" + d.target.Host + d.target.Path }
 
-func (d *Host) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (d *Host) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	targetURL := *d.target
-	targetURL.Path = r.URL.Path
+	// Strip the prefix from the request path
+	path := r.URL.Path
+	if len(path) >= len(d.prefix) {
+		path = path[len(d.prefix):]
+	}
+	if path == "" {
+		path = "/"
+	}
+
+	targetURL, err := url.Parse(d.target.String())
+	if err != nil {
+		httputil.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to parse target URL", "error", err.Error(), "upstream", d.target.String())
+		return
+	}
+	targetURL.Path = path
 	targetURL.RawQuery = r.URL.RawQuery
 	fullURL := targetURL.String()
 
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, fullURL, nil)
 	if err != nil {
-		d.httpError(w, http.StatusInternalServerError, err, "Failed to create request", slog.String("url", fullURL))
+		httputil.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to create request", "error", err.Error(), "upstream", fullURL)
 		return
 	}
 
 	resp, err := cache.Fetch(d.client, req, d.cache)
 	if err != nil {
-		if httpErr, ok := errors.AsType[cache.HTTPError](err); ok {
-			d.httpError(w, httpErr.StatusCode(), httpErr, httpErr.Error(), slog.String("url", fullURL))
+		if httpErr, ok := errors.AsType[httputil.HTTPError](err); ok {
+			httputil.ErrorResponse(w, r, httpErr.StatusCode(), httpErr.Error(), "error", httpErr.Error(), "upstream", fullURL)
 		} else {
-			d.httpError(w, http.StatusInternalServerError, err, "Failed to fetch", slog.String("url", fullURL))
+			httputil.ErrorResponse(w, r, http.StatusInternalServerError, "Failed to fetch", "error", err.Error(), "upstream", fullURL)
 		}
 		return
 	}
@@ -88,19 +107,13 @@ func (d *Host) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if resp.StatusCode != http.StatusOK {
 		w.WriteHeader(resp.StatusCode)
 		if _, err := io.Copy(w, resp.Body); err != nil {
-			d.logger.Error("Failed to copy error response", slog.String("error", err.Error()), slog.String("url", fullURL))
+			d.logger.Error("Failed to copy error response", "error", err.Error(), "upstream", fullURL)
 		}
 		return
 	}
 
 	maps.Copy(w.Header(), resp.Header)
 	if _, err := io.Copy(w, resp.Body); err != nil {
-		d.logger.Error("Failed to copy response", slog.String("error", err.Error()), slog.String("url", fullURL))
+		d.logger.Error("Failed to copy response", "error", err.Error(), "upstream", fullURL)
 	}
-}
-
-func (d *Host) httpError(w http.ResponseWriter, code int, err error, message string, args ...any) {
-	args = append(args, slog.String("error", err.Error()))
-	d.logger.Error(message, args...)
-	http.Error(w, message, code)
 }
