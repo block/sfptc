@@ -1,95 +1,151 @@
 package cache_test
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/alecthomas/assert/v2"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	testcontainersminio "github.com/testcontainers/testcontainers-go/modules/minio"
 
 	"github.com/block/sfptc/internal/cache"
 	"github.com/block/sfptc/internal/cache/cachetest"
 	"github.com/block/sfptc/internal/logging"
 )
 
-// TestS3Cache tests the S3 cache implementation.
+var (
+	minioContainer *testcontainersminio.MinioContainer
+	minioEndpoint  string
+	minioBucket    = "test-bucket"
+	minioUsername  = "minioadmin"
+	minioPassword  = "minioadmin"
+)
+
+// TestMain manages the MinIO container lifecycle for the entire test package.
+// The container is started once before all tests run and terminated after all tests complete.
+func TestMain(m *testing.M) {
+	ctx := context.Background()
+
+	// Check for opt-out environment variable
+	if os.Getenv("SKIP_TESTCONTAINERS") != "" {
+		fmt.Println("Skipping testcontainers setup (SKIP_TESTCONTAINERS is set)")
+		os.Exit(m.Run())
+	}
+
+	// Start MinIO container
+	var err error
+	minioContainer, err = testcontainersminio.Run(ctx,
+		"minio/minio:RELEASE.2024-01-16T16-07-38Z",
+		testcontainersminio.WithUsername(minioUsername),
+		testcontainersminio.WithPassword(minioPassword),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to start MinIO container: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Ensure Docker is running and accessible.\n")
+		os.Exit(1)
+	}
+
+	// Get connection details
+	connStr, err := minioContainer.ConnectionString(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get MinIO connection string: %v\n", err)
+		_ = minioContainer.Terminate(ctx)
+		os.Exit(1)
+	}
+
+	// ConnectionString returns just "host:port", but we need to handle it properly
+	// The minio-go SDK expects just the host:port without protocol
+	parsedURL, err := url.Parse(connStr)
+	if err != nil {
+		// If it can't be parsed as URL, it might already be just host:port
+		minioEndpoint = connStr
+	} else if parsedURL.Host != "" {
+		// If it parsed successfully and has a Host, use that
+		minioEndpoint = parsedURL.Host
+	} else {
+		// Otherwise use the raw string
+		minioEndpoint = connStr
+	}
+
+	// Create test bucket
+	if err := createBucket(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create test bucket: %v\n", err)
+		_ = minioContainer.Terminate(ctx)
+		os.Exit(1)
+	}
+
+	// Run tests
+	code := m.Run()
+
+	// Cleanup
+	if err := minioContainer.Terminate(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to terminate MinIO container: %v\n", err)
+	}
+
+	os.Exit(code)
+}
+
+// createBucket creates the test bucket in the MinIO container.
+func createBucket(ctx context.Context) error {
+	// Use the minio-go SDK (already in dependencies) to create bucket
+	client, err := minio.New(minioEndpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(minioUsername, minioPassword, ""),
+		Secure: false,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create minio client: %w", err)
+	}
+
+	// Create bucket if it doesn't exist
+	exists, err := client.BucketExists(ctx, minioBucket)
+	if err != nil {
+		return fmt.Errorf("failed to check if bucket exists: %w", err)
+	}
+
+	if !exists {
+		if err := client.MakeBucket(ctx, minioBucket, minio.MakeBucketOptions{}); err != nil {
+			return fmt.Errorf("failed to create bucket: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// TestS3Cache tests the S3 cache implementation using testcontainers-go.
 //
-// This test requires the following environment variables to be set:
-// - S3_TEST_ENDPOINT: S3 endpoint (e.g., localhost:9000 for local minio, or s3.amazonaws.com for AWS)
-// - S3_TEST_BUCKET: S3 bucket name
-// - S3_TEST_REGION: S3 region (optional, defaults to us-east-1)
-// - S3_TEST_USE_SSL: Whether to use SSL (optional, defaults to true)
+// This test automatically starts a MinIO container using testcontainers-go.
+// Docker must be running for these tests to execute.
 //
-// For credentials, you have two options:
+// To skip these tests (e.g., during development without Docker):
 //
-// Option 1: Explicit credentials (required for local minio):
-// - S3_TEST_ACCESS_KEY_ID: S3 access key ID
-// - S3_TEST_SECRET_ACCESS_KEY: S3 secret access key
+//	SKIP_TESTCONTAINERS=1 go test ./internal/cache
 //
-// Option 2: AWS credential chain (for AWS S3 or EC2 instances with IAM roles):
-// - Leave S3_TEST_ACCESS_KEY_ID and S3_TEST_SECRET_ACCESS_KEY unset
-// - The test will use the standard AWS credential chain:
-//  1. AWS environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-//  2. AWS credentials file (~/.aws/credentials)
-//  3. IAM role from EC2 instance metadata
-//
-// To run tests against a local minio server:
-//
-//	docker run -d -p 9000:9000 -p 9001:9001 \
-//	  -e "MINIO_ROOT_USER=minioadmin" \
-//	  -e "MINIO_ROOT_PASSWORD=minioadmin" \
-//	  minio/minio server /data --console-address ":9001"
-//
-//	# Create a test bucket using mc (minio client)
-//	docker exec <container-id> mc alias set local http://localhost:9000 minioadmin minioadmin
-//	docker exec <container-id> mc mb local/test-bucket
-//
-//	export S3_TEST_ENDPOINT=localhost:9000
-//	export S3_TEST_ACCESS_KEY_ID=minioadmin
-//	export S3_TEST_SECRET_ACCESS_KEY=minioadmin
-//	export S3_TEST_BUCKET=test-bucket
-//	export S3_TEST_USE_SSL=false
-//	go test -v ./internal/cache -run TestS3Cache
-//
-// To run tests against AWS S3 with IAM credentials:
-//
-//	export S3_TEST_ENDPOINT=s3.amazonaws.com
-//	export S3_TEST_BUCKET=my-test-bucket
-//	export S3_TEST_REGION=us-east-1
-//	# AWS credentials will be picked up from environment, credentials file, or IAM role
-//	go test -v ./internal/cache -run TestS3Cache
+// The MinIO container:
+// - Starts once per test package run
+// - Uses credentials: minioadmin/minioadmin
+// - Listens on a random available port
+// - Cleans up automatically after tests complete
 func TestS3Cache(t *testing.T) {
-	endpoint := os.Getenv("S3_TEST_ENDPOINT")
-	bucket := os.Getenv("S3_TEST_BUCKET")
-
-	if endpoint == "" || bucket == "" {
-		t.Skip("Skipping S3 cache tests: S3_TEST_ENDPOINT and S3_TEST_BUCKET environment variables must be set")
-	}
-
-	// Credentials are optional - will use AWS credential chain if not provided
-	accessKeyID := os.Getenv("S3_TEST_ACCESS_KEY_ID")
-	secretAccessKey := os.Getenv("S3_TEST_SECRET_ACCESS_KEY")
-
-	region := os.Getenv("S3_TEST_REGION")
-	if region == "" {
-		region = "us-west-2"
-	}
-
-	useSSL := true
-	if os.Getenv("S3_TEST_USE_SSL") == "false" {
-		useSSL = false
+	if minioContainer == nil {
+		t.Skip("MinIO container not available - Docker may not be running or SKIP_TESTCONTAINERS is set")
 	}
 
 	cachetest.Suite(t, func(t *testing.T) cache.Cache {
 		_, ctx := logging.Configure(t.Context(), logging.Config{Level: slog.LevelDebug})
+		useSSL := false
 		c, err := cache.NewS3(ctx, cache.S3Config{
-			Endpoint:        endpoint,
-			AccessKeyID:     accessKeyID,
-			SecretAccessKey: secretAccessKey,
-			Bucket:          bucket,
-			Region:          region,
-			UseSSL:          useSSL,
+			Endpoint:        minioEndpoint,
+			AccessKeyID:     minioUsername,
+			SecretAccessKey: minioPassword,
+			Bucket:          minioBucket,
+			Region:          "",
+			UseSSL:          &useSSL, // MinIO container serves HTTP, not HTTPS
 			MaxTTL:          100 * time.Millisecond,
 		})
 		assert.NoError(t, err)

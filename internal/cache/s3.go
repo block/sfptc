@@ -3,6 +3,7 @@ package cache
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/alecthomas/errors"
-	"github.com/alecthomas/kong"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
@@ -29,9 +29,10 @@ type S3Config struct {
 	AccessKeyID     string        `hcl:"access-key-id,optional" help:"S3 access key ID (optional, uses AWS credential chain if not provided)."`
 	SecretAccessKey string        `hcl:"secret-access-key,optional" help:"S3 secret access key (optional, uses AWS credential chain if not provided)."`
 	Bucket          string        `hcl:"bucket" help:"S3 bucket name."`
-	Region          string        `hcl:"region,optional" help:"S3 region (defaults to us-west-2)." default:"us-west-2"`
-	UseSSL          bool          `hcl:"use-ssl,optional" help:"Use SSL for S3 connections (defaults to true)." default:"true"`
-	MaxTTL          time.Duration `hcl:"max-ttl,optional" help:"Maximum time-to-live for entries in the S3 cache (defaults to 1 hour)." default:"1h"`
+	Region          string        `hcl:"region,optional" help:"S3 region (defaults to us-west-2)."`
+	UseSSL          *bool         `hcl:"use-ssl,optional" help:"Use SSL for S3 connections (defaults to true)."`
+	SkipSSLVerify   bool          `hcl:"skip-ssl-verify,optional" help:"Skip SSL certificate verification (defaults to false)."`
+	MaxTTL          time.Duration `hcl:"max-ttl,optional" help:"Maximum time-to-live for entries in the S3 cache (defaults to 1 hour)."`
 }
 
 type S3 struct {
@@ -64,14 +65,6 @@ func credentialMode(config S3Config) string {
 // Metadata (headers and expiration time) are stored as object user metadata. The implementation
 // uses the lightweight minio-go SDK to reduce overhead compared to the AWS SDK.
 func NewS3(ctx context.Context, config S3Config) (*S3, error) {
-	logging.FromContext(ctx).InfoContext(ctx, "Constructing S3 cache",
-		"endpoint", config.Endpoint,
-		"bucket", config.Bucket,
-		"region", config.Region,
-		"use-ssl", config.UseSSL,
-		"max-ttl", config.MaxTTL,
-		"credentials-mode", credentialMode(config))
-
 	// Validate config
 	if config.Endpoint == "" {
 		return nil, errors.New("endpoint is required")
@@ -80,13 +73,46 @@ func NewS3(ctx context.Context, config S3Config) (*S3, error) {
 		return nil, errors.New("bucket is required")
 	}
 
-	err := kong.ApplyDefaults(&config)
-	if err != nil {
-		return nil, errors.Errorf("failed to apply defaults: %w", err)
+	// Apply defaults only for zero values
+	if config.Region == "" {
+		config.Region = "us-west-2"
+	}
+	if config.MaxTTL == 0 {
+		config.MaxTTL = time.Hour
+	}
+	// UseSSL defaults to true if not explicitly set
+	useSSL := true
+	if config.UseSSL != nil {
+		useSSL = *config.UseSSL
 	}
 
-	// Determine credential provider
+	logging.FromContext(ctx).InfoContext(ctx, "Constructing S3 cache",
+		"endpoint", config.Endpoint,
+		"bucket", config.Bucket,
+		"region", config.Region,
+		"use-ssl", useSSL,
+		"max-ttl", config.MaxTTL,
+		"credentials-mode", credentialMode(config))
+
+	// Determine credential provider and optional custom transport
 	var creds *credentials.Credentials
+	var transport http.RoundTripper
+
+	// Only create custom transport if we need to skip SSL verification
+	if config.SkipSSLVerify {
+		defaultTransport, err := minio.DefaultTransport(useSSL)
+		if err != nil {
+			return nil, errors.Errorf("failed to create default transport: %w", err)
+		}
+		// Clone the default transport and disable SSL verification
+		customTransport := defaultTransport.Clone()
+		if customTransport.TLSClientConfig == nil {
+			customTransport.TLSClientConfig = &tls.Config{}
+		}
+		customTransport.TLSClientConfig.InsecureSkipVerify = true
+		transport = customTransport
+	}
+
 	if config.AccessKeyID != "" && config.SecretAccessKey != "" {
 		// Use static credentials if both are provided
 		creds = credentials.NewStaticV4(config.AccessKeyID, config.SecretAccessKey, "")
@@ -95,9 +121,13 @@ func NewS3(ctx context.Context, config S3Config) (*S3, error) {
 		return nil, errors.New("both access-key-id and secret-access-key must be provided together, or neither for credential chain")
 	} else {
 		// Use AWS credential chain if neither is provided
-		transport, err := minio.DefaultTransport(config.UseSSL)
+		defaultTransport, err := minio.DefaultTransport(useSSL)
 		if err != nil {
 			return nil, errors.Errorf("failed to create default transport: %w", err)
+		}
+		if transport != nil {
+			// Use custom transport if already set (for SkipSSLVerify)
+			defaultTransport = transport.(*http.Transport)
 		}
 		creds = credentials.NewChainCredentials(
 			[]credentials.Provider{
@@ -105,18 +135,25 @@ func NewS3(ctx context.Context, config S3Config) (*S3, error) {
 				&credentials.FileAWSCredentials{}, // Check ~/.aws/credentials
 				&credentials.IAM{
 					Client: &http.Client{
-						Transport: transport,
+						Transport: defaultTransport,
 					},
 				}, // Check EC2 instance metadata or ECS container credentials
 			})
 	}
 
-	// Create minio client
-	client, err := minio.New(config.Endpoint, &minio.Options{
+	// Create minio client options
+	options := &minio.Options{
 		Creds:  creds,
-		Secure: config.UseSSL,
+		Secure: useSSL,
 		Region: config.Region,
-	})
+	}
+
+	// Only set custom transport if needed (for SkipSSLVerify)
+	if transport != nil {
+		options.Transport = transport
+	}
+
+	client, err := minio.New(config.Endpoint, options)
 	if err != nil {
 		return nil, errors.Errorf("failed to create minio client: %w", err)
 	}
