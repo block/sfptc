@@ -467,6 +467,7 @@ linters:
           - errcheck
           - funlen
           - goconst
+          - godot
           - gosec
           - noctx
           - wrapcheck
