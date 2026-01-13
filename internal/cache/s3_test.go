@@ -34,7 +34,6 @@ func TestMain(m *testing.M) {
 
 	// Check for opt-out environment variable
 	if os.Getenv("SKIP_TESTCONTAINERS") != "" {
-		fmt.Println("Skipping testcontainers setup (SKIP_TESTCONTAINERS is set)")
 		os.Exit(m.Run())
 	}
 
@@ -62,13 +61,14 @@ func TestMain(m *testing.M) {
 	// ConnectionString returns just "host:port", but we need to handle it properly
 	// The minio-go SDK expects just the host:port without protocol
 	parsedURL, err := url.Parse(connStr)
-	if err != nil {
+	switch {
+	case err != nil:
 		// If it can't be parsed as URL, it might already be just host:port
 		minioEndpoint = connStr
-	} else if parsedURL.Host != "" {
+	case parsedURL.Host != "":
 		// If it parsed successfully and has a Host, use that
 		minioEndpoint = parsedURL.Host
-	} else {
+	default:
 		// Otherwise use the raw string
 		minioEndpoint = connStr
 	}

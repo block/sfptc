@@ -107,19 +107,24 @@ func NewS3(ctx context.Context, config S3Config) (*S3, error) {
 		// Clone the default transport and disable SSL verification
 		customTransport := defaultTransport.Clone()
 		if customTransport.TLSClientConfig == nil {
-			customTransport.TLSClientConfig = &tls.Config{}
+			customTransport.TLSClientConfig = &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+		} else {
+			customTransport.TLSClientConfig.MinVersion = tls.VersionTLS12
 		}
 		customTransport.TLSClientConfig.InsecureSkipVerify = true
 		transport = customTransport
 	}
 
-	if config.AccessKeyID != "" && config.SecretAccessKey != "" {
+	switch {
+	case config.AccessKeyID != "" && config.SecretAccessKey != "":
 		// Use static credentials if both are provided
 		creds = credentials.NewStaticV4(config.AccessKeyID, config.SecretAccessKey, "")
-	} else if config.AccessKeyID != "" || config.SecretAccessKey != "" {
+	case config.AccessKeyID != "" || config.SecretAccessKey != "":
 		// Error if only one is provided
 		return nil, errors.New("both access-key-id and secret-access-key must be provided together, or neither for credential chain")
-	} else {
+	default:
 		// Use AWS credential chain if neither is provided
 		defaultTransport, err := minio.DefaultTransport(useSSL)
 		if err != nil {
@@ -127,7 +132,11 @@ func NewS3(ctx context.Context, config S3Config) (*S3, error) {
 		}
 		if transport != nil {
 			// Use custom transport if already set (for SkipSSLVerify)
-			defaultTransport = transport.(*http.Transport)
+			var ok bool
+			defaultTransport, ok = transport.(*http.Transport)
+			if !ok {
+				return nil, errors.New("transport is not an *http.Transport")
+			}
 		}
 		creds = credentials.NewChainCredentials(
 			[]credentials.Provider{
