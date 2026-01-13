@@ -136,8 +136,14 @@ func (s *S3) Close() error {
 	return nil
 }
 
+func (s *S3) keyToPath(key Key) string {
+	hexKey := key.String()
+	// Use first two hex digits as directory, full hex as filename
+	return hexKey[:2] + "/" + hexKey
+}
+
 func (s *S3) Open(ctx context.Context, key Key) (io.ReadCloser, textproto.MIMEHeader, error) {
-	objectName := key.String()
+	objectName := s.keyToPath(key)
 
 	// Get object info to check metadata
 	objInfo, err := s.client.StatObject(ctx, s.config.Bucket, objectName, minio.StatObjectOptions{})
@@ -206,7 +212,7 @@ func (s *S3) Create(ctx context.Context, key Key, headers textproto.MIMEHeader, 
 }
 
 func (s *S3) Delete(ctx context.Context, key Key) error {
-	objectName := key.String()
+	objectName := s.keyToPath(key)
 
 	// Check if object exists first
 	_, err := s.client.StatObject(ctx, s.config.Bucket, objectName, minio.StatObjectOptions{})
@@ -258,7 +264,7 @@ func (w *s3Writer) Close() error {
 func (w *s3Writer) upload(pr *io.PipeReader) {
 	defer pr.Close()
 
-	objectName := w.key.String()
+	objectName := w.s3.keyToPath(w.key)
 
 	// Prepare user metadata
 	userMetadata := make(map[string]string)
