@@ -214,17 +214,7 @@ func (s *S3) Create(ctx context.Context, key Key, headers textproto.MIMEHeader, 
 func (s *S3) Delete(ctx context.Context, key Key) error {
 	objectName := s.keyToPath(key)
 
-	// Check if object exists first
-	_, err := s.client.StatObject(ctx, s.config.Bucket, objectName, minio.StatObjectOptions{})
-	if err != nil {
-		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
-			return os.ErrNotExist
-		}
-		return errors.Errorf("failed to stat object: %w", err)
-	}
-
-	err = s.client.RemoveObject(ctx, s.config.Bucket, objectName, minio.RemoveObjectOptions{})
+	err := s.client.RemoveObject(ctx, s.config.Bucket, objectName, minio.RemoveObjectOptions{})
 	if err != nil {
 		return errors.Errorf("failed to remove object: %w", err)
 	}
