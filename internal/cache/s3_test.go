@@ -138,6 +138,28 @@ func TestS3Cache(t *testing.T) {
 
 	cachetest.Suite(t, func(t *testing.T) cache.Cache {
 		_, ctx := logging.Configure(t.Context(), logging.Config{Level: slog.LevelDebug})
+
+		// Clean up any existing objects in the bucket before creating a new cache instance
+		// This ensures test isolation since all tests share the same bucket
+		client, err := minio.New(minioEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(minioUsername, minioPassword, ""),
+			Secure: false,
+		})
+		assert.NoError(t, err)
+
+		// Remove all objects from the bucket
+		objectsCh := client.ListObjects(ctx, minioBucket, minio.ListObjectsOptions{Recursive: true})
+		for obj := range objectsCh {
+			if obj.Err != nil {
+				t.Logf("Error listing objects: %v", obj.Err)
+				continue
+			}
+			err := client.RemoveObject(ctx, minioBucket, obj.Key, minio.RemoveObjectOptions{})
+			if err != nil {
+				t.Logf("Error removing object %s: %v", obj.Key, err)
+			}
+		}
+
 		useSSL := false
 		c, err := cache.NewS3(ctx, cache.S3Config{
 			Endpoint:        minioEndpoint,

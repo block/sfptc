@@ -205,7 +205,8 @@ func (s *S3) Open(ctx context.Context, key Key) (io.ReadCloser, textproto.MIMEHe
 	}
 
 	// Check if object has expired
-	expiresAtStr := objInfo.UserMetadata["X-Amz-Meta-Expires-At"]
+	// Note: UserMetadata keys are returned WITHOUT the "X-Amz-Meta-" prefix by minio-go
+	expiresAtStr := objInfo.UserMetadata["Expires-At"]
 	if expiresAtStr != "" {
 		var expiresAt time.Time
 		if err := expiresAt.UnmarshalText([]byte(expiresAtStr)); err == nil {
@@ -217,8 +218,9 @@ func (s *S3) Open(ctx context.Context, key Key) (io.ReadCloser, textproto.MIMEHe
 	}
 
 	// Retrieve headers from metadata
+	// Note: UserMetadata keys are returned WITHOUT the "X-Amz-Meta-" prefix by minio-go
 	headers := make(textproto.MIMEHeader)
-	if headersJSON := objInfo.UserMetadata["X-Amz-Meta-Headers"]; headersJSON != "" {
+	if headersJSON := objInfo.UserMetadata["Headers"]; headersJSON != "" {
 		if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
 			return nil, nil, errors.Errorf("failed to unmarshal headers: %w", err)
 		}
