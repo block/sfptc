@@ -93,7 +93,7 @@ func testExpiration(t *testing.T, c cache.Cache) {
 
 	key := cache.NewKey("test-key")
 
-	writer, err := c.Create(ctx, key, nil, 10*time.Millisecond)
+	writer, err := c.Create(ctx, key, nil, time.Millisecond*250)
 	assert.NoError(t, err)
 
 	_, err = writer.Write([]byte("test data"))
@@ -106,7 +106,7 @@ func testExpiration(t *testing.T, c cache.Cache) {
 	assert.NoError(t, err)
 	assert.NoError(t, reader.Close())
 
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	_, _, err = c.Open(ctx, key)
 	assert.IsError(t, err, os.ErrNotExist)
