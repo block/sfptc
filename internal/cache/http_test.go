@@ -11,8 +11,8 @@ import (
 
 	"github.com/alecthomas/assert/v2"
 
-	"github.com/block/sfptc/internal/cache"
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/cache"
+	"github.com/block/cachew/internal/logging"
 )
 
 func TestCachedFetch(t *testing.T) {

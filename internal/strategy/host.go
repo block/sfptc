@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/block/sfptc/internal/cache"
-	"github.com/block/sfptc/internal/logging"
-	"github.com/block/sfptc/internal/strategy/handler"
+	"github.com/block/cachew/internal/cache"
+	"github.com/block/cachew/internal/logging"
+	"github.com/block/cachew/internal/strategy/handler"
 )
 
 func init() {

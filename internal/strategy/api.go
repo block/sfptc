@@ -8,7 +8,7 @@ import (
 	"github.com/alecthomas/errors"
 	"github.com/alecthomas/hcl/v2"
 
-	"github.com/block/sfptc/internal/cache"
+	"github.com/block/cachew/internal/cache"
 )
 
 // ErrNotFound is returned when a strategy is not found.

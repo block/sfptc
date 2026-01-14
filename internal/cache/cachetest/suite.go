@@ -10,7 +10,7 @@ import (
 
 	"github.com/alecthomas/assert/v2"
 
-	"github.com/block/sfptc/internal/cache"
+	"github.com/block/cachew/internal/cache"
 )
 
 // Suite runs a comprehensive test suite against a cache.Cache implementation.

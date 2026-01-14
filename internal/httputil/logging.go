@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/logging"
 )
 
 func LoggingMiddleware(next http.Handler) http.Handler {

@@ -11,19 +11,19 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/block/sfptc/internal/config"
-	"github.com/block/sfptc/internal/httputil"
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/config"
+	"github.com/block/cachew/internal/httputil"
+	"github.com/block/cachew/internal/logging"
 )
 
 var cli struct {
-	Config        *os.File       `hcl:"-" help:"Configuration file path." placeholder:"PATH" required:"" default:"sfptc.hcl"`
+	Config        *os.File       `hcl:"-" help:"Configuration file path." placeholder:"PATH" required:"" default:"cachew.hcl"`
 	Bind          string         `hcl:"bind" default:"127.0.0.1:8080" help:"Bind address for the server."`
 	LoggingConfig logging.Config `embed:"" prefix:"log-"`
 }
 
 func main() {
-	kctx := kong.Parse(&cli, kong.DefaultEnvars("SFPTC"))
+	kctx := kong.Parse(&cli, kong.DefaultEnvars("CACHEW"))
 
 	ctx := context.Background()
 	logger, ctx := logging.Configure(ctx, cli.LoggingConfig)
@@ -33,7 +33,7 @@ func main() {
 	err := config.Load(ctx, cli.Config, mux, parseEnvars())
 	kctx.FatalIfErrorf(err)
 
-	logger.InfoContext(ctx, "Starting sfptcd", slog.String("bind", cli.Bind))
+	logger.InfoContext(ctx, "Starting cachewd", slog.String("bind", cli.Bind))
 
 	server := &http.Server{
 		Addr:              cli.Bind,

@@ -1,4 +1,4 @@
-module github.com/block/sfptc
+module github.com/block/cachew
 
 go 1.25.5
 
