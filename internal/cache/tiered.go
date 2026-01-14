@@ -11,7 +11,7 @@ import (
 
 	"github.com/alecthomas/errors"
 
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/logging"
 )
 
 // The Tiered cache combines multiple caches.

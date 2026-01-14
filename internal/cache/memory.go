@@ -12,7 +12,7 @@ import (
 
 	"github.com/alecthomas/errors"
 
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/logging"
 )
 
 func init() {

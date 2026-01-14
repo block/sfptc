@@ -11,9 +11,9 @@ import (
 
 	"github.com/alecthomas/errors"
 
-	"github.com/block/sfptc/internal/cache"
-	"github.com/block/sfptc/internal/httputil"
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/cache"
+	"github.com/block/cachew/internal/httputil"
+	"github.com/block/cachew/internal/logging"
 )
 
 // Handler provides a fluent API for creating cache-backed HTTP handlers.

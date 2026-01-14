@@ -11,8 +11,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/block/sfptc/internal/cache"
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/cache"
+	"github.com/block/cachew/internal/logging"
 )
 
 func init() {

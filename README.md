@@ -1,6 +1,6 @@
-# Super-fast Pass-through Cache (SFPTC)
+# Cachew (pronounced cashew) is a super-fast pass-through cache
 
-SFPTC is a server and tooling for incredibly efficient, protocol-aware caching. It is
+Cachew is a server and tooling for incredibly efficient, protocol-aware caching. It is
 designed to be used at scale, with minimal impact on upstream systems. By "protocol-aware", we mean that the proxy isn't
 just a naive HTTP proxy, it is aware of the higher level protocol being proxied (Git, Docker, etc.) and can make more efficient decisions.
 
@@ -19,11 +19,11 @@ To solve this we apply two different strategies on the server:
 On the client we redirect git to the proxy:
 
 ```ini
-[url "https://sfptc.local/github/"]
+[url "https://cachew.local/github/"]
   insteadOf = https://github.com/
 ```
 
-As Git itself isn't aware of the snapshots, Git-specific code in the SFPTC CLI can be used to reconstruct a repository.
+As Git itself isn't aware of the snapshots, Git-specific code in the Cachew CLI can be used to reconstruct a repository.
 
 ## Docker
 

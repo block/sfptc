@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/alecthomas/kong"
 
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/logging"
 )
 
 var cli struct {

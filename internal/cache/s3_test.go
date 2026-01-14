@@ -14,9 +14,9 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	testcontainersminio "github.com/testcontainers/testcontainers-go/modules/minio"
 
-	"github.com/block/sfptc/internal/cache"
-	"github.com/block/sfptc/internal/cache/cachetest"
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/cache"
+	"github.com/block/cachew/internal/cache/cachetest"
+	"github.com/block/cachew/internal/logging"
 )
 
 var (

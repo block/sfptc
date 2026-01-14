@@ -1,5 +1,5 @@
 builds:
-  - main: ./cmd/sfptc
+  - main: ./cmd/cachew
     binary: sfptc
     id: sfptc
     env:
@@ -10,7 +10,7 @@ builds:
     goarch:
       - amd64
       - arm64
-  - main: ./cmd/sfptcd
+  - main: ./cmd/cachewd
     id: sfptcd
     binary: sfptcd
     env:

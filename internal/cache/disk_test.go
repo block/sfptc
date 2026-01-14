@@ -7,9 +7,9 @@ import (
 
 	"github.com/alecthomas/assert/v2"
 
-	"github.com/block/sfptc/internal/cache"
-	"github.com/block/sfptc/internal/cache/cachetest"
-	"github.com/block/sfptc/internal/logging"
+	"github.com/block/cachew/internal/cache"
+	"github.com/block/cachew/internal/cache/cachetest"
+	"github.com/block/cachew/internal/logging"
 )
 
 func TestDiskCache(t *testing.T) {
