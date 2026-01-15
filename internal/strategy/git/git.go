@@ -26,8 +26,9 @@ func init() {
 
 // Config for the Git strategy.
 type Config struct {
-	MirrorRoot    string        `hcl:"mirror-root" help:"Directory to store git mirrors." required:""`
-	FetchInterval time.Duration `hcl:"fetch-interval,optional" help:"How often to fetch from upstream in minutes." default:"15m"`
+	MirrorRoot       string        `hcl:"mirror-root" help:"Directory to store git mirrors." required:""`
+	FetchInterval    time.Duration `hcl:"fetch-interval,optional" help:"How often to fetch from upstream in minutes." default:"15m"`
+	RefCheckInterval time.Duration `hcl:"ref-check-interval,optional" help:"How long to cache ref checks." default:"10s"`
 }
 
 // cloneState represents the current state of a bare clone.
@@ -41,11 +42,14 @@ const (
 
 // clone represents a bare clone of an upstream repository.
 type clone struct {
-	mu          sync.RWMutex
-	state       cloneState
-	path        string
-	upstreamURL string
-	lastFetch   time.Time
+	mu            sync.RWMutex
+	state         cloneState
+	path          string
+	upstreamURL   string
+	lastFetch     time.Time
+	lastRefCheck  time.Time
+	refCheckValid bool
+	fetchSem      chan struct{} // Semaphore to coordinate fetch operations
 }
 
 // Strategy implements a protocol-aware Git caching proxy.
@@ -68,6 +72,10 @@ func New(ctx context.Context, config Config, cache cache.Cache, mux strategy.Mux
 
 	if config.FetchInterval == 0 {
 		config.FetchInterval = 15 * time.Minute
+	}
+
+	if config.RefCheckInterval == 0 {
+		config.RefCheckInterval = 10 * time.Second
 	}
 
 	if err := os.MkdirAll(config.MirrorRoot, 0o750); err != nil {
@@ -100,7 +108,8 @@ func New(ctx context.Context, config Config, cache cache.Cache, mux strategy.Mux
 
 	logger.InfoContext(ctx, "Git strategy initialized",
 		"mirror_root", config.MirrorRoot,
-		"fetch_interval", config.FetchInterval)
+		"fetch_interval", config.FetchInterval,
+		"ref_check_interval", config.RefCheckInterval)
 
 	return s, nil
 }
@@ -143,9 +152,20 @@ func (s *Strategy) handleRequest(w http.ResponseWriter, r *http.Request) {
 	state := c.state
 	c.mu.RUnlock()
 
+	// Check if this is an info/refs request (ref discovery)
+	isInfoRefs := strings.HasSuffix(pathValue, "/info/refs")
+
 	switch state {
 	case stateReady:
-		// Check if we need to fetch updates
+		// For info/refs requests, ensure we have the latest refs from upstream
+		if isInfoRefs {
+			if err := s.ensureRefsUpToDate(ctx, c); err != nil {
+				logger.WarnContext(ctx, "Failed to ensure refs up to date",
+					slog.String("error", err.Error()))
+				// Continue serving even if ref check fails
+			}
+		}
+		// Also do background fetch if interval has passed
 		s.maybeBackgroundFetch(ctx, c)
 		s.serveFromBackend(w, r, c)
 
@@ -198,6 +218,7 @@ func (s *Strategy) getOrCreateClone(ctx context.Context, upstreamURL string) *cl
 		state:       stateEmpty,
 		path:        clonePath,
 		upstreamURL: upstreamURL,
+		fetchSem:    make(chan struct{}, 1),
 	}
 
 	// Check if clone already exists on disk (from previous run)
@@ -206,6 +227,9 @@ func (s *Strategy) getOrCreateClone(ctx context.Context, upstreamURL string) *cl
 		logging.FromContext(ctx).DebugContext(ctx, "Found existing clone on disk",
 			slog.String("path", clonePath))
 	}
+
+	// Initialize semaphore as available
+	c.fetchSem <- struct{}{}
 
 	s.clones[upstreamURL] = c
 	return c

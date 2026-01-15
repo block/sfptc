@@ -170,3 +170,57 @@ func TestIntegrationWithMockUpstream(t *testing.T) {
 	assert.NotZero(t, mux.handlers["GET /git/{host}/{path...}"])
 	assert.NotZero(t, mux.handlers["POST /git/{host}/{path...}"])
 }
+
+func TestParseGitRefs(t *testing.T) {
+	_, ctx := logging.Configure(context.Background(), logging.Config{})
+	_ = ctx
+
+	tests := []struct {
+		name     string
+		output   string
+		expected map[string]string
+	}{
+		{
+			name: "MultipleRefs",
+			output: `abc123def456 refs/heads/main
+789ghi012jkl refs/heads/develop
+mno345pqr678 refs/tags/v1.0.0`,
+			expected: map[string]string{
+				"refs/heads/main":    "abc123def456",
+				"refs/heads/develop": "789ghi012jkl",
+				"refs/tags/v1.0.0":   "mno345pqr678",
+			},
+		},
+		{
+			name:     "EmptyOutput",
+			output:   "",
+			expected: map[string]string{},
+		},
+		{
+			name: "SingleRef",
+			output: `abc123def456 refs/heads/main
+`,
+			expected: map[string]string{
+				"refs/heads/main": "abc123def456",
+			},
+		},
+		{
+			name: "WithPeeledRefs",
+			output: `e93f19bd6cab17c507792599b8a22f7b567ef516 refs/tags/v1.2.1
+babfaf8dee0baa09c56d1a2ec5623b60d900518b refs/tags/v1.2.1^{}
+abc123def456 refs/heads/main`,
+			expected: map[string]string{
+				"refs/tags/v1.2.1":    "e93f19bd6cab17c507792599b8a22f7b567ef516",
+				"refs/tags/v1.2.1^{}": "babfaf8dee0baa09c56d1a2ec5623b60d900518b",
+				"refs/heads/main":     "abc123def456",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := git.ParseGitRefs([]byte(tt.output))
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
