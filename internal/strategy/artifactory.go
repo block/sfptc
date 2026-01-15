@@ -21,10 +21,10 @@ func init() {
 //
 // In HCL it looks something like this:
 //
-//	artifactory "https://global.block-artifacts.com" {
+//	artifactory "https://example.jfrog.io" {
 //	}
 //
-// The strategy will be mounted under "/global.block-artifacts.com".
+// The strategy will be mounted under "/example.jfrog.io".
 type ArtifactoryConfig struct {
 	Target string `hcl:"target,label" help:"The target Artifactory URL to proxy requests to."`
 }
