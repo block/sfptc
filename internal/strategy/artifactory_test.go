@@ -232,3 +232,120 @@ func TestArtifactoryInvalidTargetURL(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestArtifactoryHostBasedRouting(t *testing.T) {
+	mock, mux, _, ctx := setupArtifactoryTest(t, strategy.ArtifactoryConfig{
+		Hosts: []string{"maven.block-artifacts.com", "npm.block-artifacts.com"},
+	})
+
+	// Request using host-based routing
+	req := httptest.NewRequest(http.MethodGet, "/libs-release/com/example/app/1.0/app-1.0.jar", nil)
+	req.Host = "maven.block-artifacts.com"
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, []byte("artifact-content"), w.Body.Bytes())
+	assert.Equal(t, 1, mock.requestCount)
+	assert.Equal(t, "/libs-release/com/example/app/1.0/app-1.0.jar", mock.lastRequestPath)
+}
+
+func TestArtifactoryMultipleHostsSameUpstream(t *testing.T) {
+	mock, mux, _, ctx := setupArtifactoryTest(t, strategy.ArtifactoryConfig{
+		Hosts: []string{"maven.block-artifacts.com", "npm.block-artifacts.com"},
+	})
+
+	// First request via maven host
+	req1 := httptest.NewRequest(http.MethodGet, "/libs-release/com/example/app/1.0/app-1.0.jar", nil)
+	req1.Host = "maven.block-artifacts.com"
+	req1 = req1.WithContext(ctx)
+	w1 := httptest.NewRecorder()
+	mux.ServeHTTP(w1, req1)
+
+	assert.Equal(t, http.StatusOK, w1.Code)
+	assert.Equal(t, 1, mock.requestCount)
+
+	// Second request via npm host for the same artifact - should hit cache
+	req2 := httptest.NewRequest(http.MethodGet, "/libs-release/com/example/app/1.0/app-1.0.jar", nil)
+	req2.Host = "npm.block-artifacts.com"
+	req2 = req2.WithContext(ctx)
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Equal(t, 1, mock.requestCount, "second request via different host should hit cache")
+}
+
+func TestArtifactoryBothRoutingModesSimultaneously(t *testing.T) {
+	mock, mux, _, ctx := setupArtifactoryTest(t, strategy.ArtifactoryConfig{
+		Hosts: []string{"maven.block-artifacts.com"},
+	})
+
+	// First request using host-based routing
+	req1 := httptest.NewRequest(http.MethodGet, "/libs-release/com/example/app/1.0/app-1.0.jar", nil)
+	req1.Host = "maven.block-artifacts.com"
+	req1 = req1.WithContext(ctx)
+	w1 := httptest.NewRecorder()
+	mux.ServeHTTP(w1, req1)
+
+	assert.Equal(t, http.StatusOK, w1.Code)
+	assert.Equal(t, []byte("artifact-content"), w1.Body.Bytes())
+	assert.Equal(t, 1, mock.requestCount)
+
+	// Second request using path-based routing for same artifact - should hit cache
+	pathBasedURL := "/" + mock.server.Listener.Addr().String() + "/libs-release/com/example/app/1.0/app-1.0.jar"
+	req2 := httptest.NewRequest(http.MethodGet, pathBasedURL, nil)
+	req2 = req2.WithContext(ctx)
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+
+	assert.Equal(t, http.StatusOK, w2.Code)
+	assert.Equal(t, []byte("artifact-content"), w2.Body.Bytes())
+	assert.Equal(t, 1, mock.requestCount, "path-based request should hit cache from host-based request")
+
+	// Third request using host-based routing again - still should be from cache
+	req3 := httptest.NewRequest(http.MethodGet, "/libs-release/com/example/app/1.0/app-1.0.jar", nil)
+	req3.Host = "maven.block-artifacts.com"
+	req3 = req3.WithContext(ctx)
+	w3 := httptest.NewRecorder()
+	mux.ServeHTTP(w3, req3)
+
+	assert.Equal(t, http.StatusOK, w3.Code)
+	assert.Equal(t, 1, mock.requestCount, "both routing modes should share the same cache")
+}
+
+func TestArtifactoryHostBasedWithPort(t *testing.T) {
+	mock, mux, _, ctx := setupArtifactoryTest(t, strategy.ArtifactoryConfig{
+		Hosts: []string{"maven.block-artifacts.com"},
+	})
+
+	// Request with host including port - should match configured host (port is ignored)
+	req := httptest.NewRequest(http.MethodGet, "/libs-release/com/example/app/1.0/app-1.0.jar", nil)
+	req.Host = "maven.block-artifacts.com:8080"
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, []byte("artifact-content"), w.Body.Bytes())
+	assert.Equal(t, 1, mock.requestCount)
+}
+
+func TestArtifactoryPathBasedOnlyWhenNoHostsConfigured(t *testing.T) {
+	mock, mux, _, ctx := setupArtifactoryTest(t, strategy.ArtifactoryConfig{
+		Hosts: []string{}, // Empty hosts - should only use path-based routing
+	})
+
+	// Path-based routing should work
+	pathBasedURL := "/" + mock.server.Listener.Addr().String() + "/libs-release/com/example/app/1.0/app-1.0.jar"
+	req := httptest.NewRequest(http.MethodGet, pathBasedURL, nil)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, []byte("artifact-content"), w.Body.Bytes())
+	assert.Equal(t, 1, mock.requestCount)
+}
+
+
