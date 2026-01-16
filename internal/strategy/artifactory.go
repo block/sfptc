@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/block/cachew/internal/cache"
 	"github.com/block/cachew/internal/logging"
@@ -39,9 +38,7 @@ type ArtifactoryConfig struct {
 // caching the response payloads.
 //
 // Key features:
-// - Cache key uses full target URL (consistent with other strategies)
 // - Sets X-JFrog-Download-Redirect-To header to prevent redirects
-// - 7-day default TTL for cached artifacts
 // - Passes through authentication headers
 // - Supports both host-based and path-based routing simultaneously.
 type Artifactory struct {
@@ -74,15 +71,12 @@ func NewArtifactory(ctx context.Context, config ArtifactoryConfig, cache cache.C
 		}).
 		Transform(func(r *http.Request) (*http.Request, error) {
 			return a.transformRequest(r)
-		}).
-		TTL(func(_ *http.Request) time.Duration {
-			return 7 * 24 * time.Hour // 7 days
 		})
 
-	// ALWAYS register path-based route (for backward compatibility)
+	// Register path-based route (for backward compatibility)
 	a.registerPathBased(ctx, u, hdlr, mux)
 
-	// ALSO register host-based routes if configured
+	// Register host-based routes if configured
 	if len(config.Hosts) > 0 {
 		a.registerHostBased(ctx, config.Hosts, hdlr, mux)
 	}
