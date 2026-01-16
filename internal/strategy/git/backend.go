@@ -153,6 +153,7 @@ func (s *Strategy) ensureRefsUpToDate(ctx context.Context, c *clone) error {
 		return nil
 	}
 	c.lastRefCheck = time.Now()
+	c.refCheckValid = true
 	c.mu.Unlock()
 
 	logger.DebugContext(ctx, "Checking upstream for new refs",
@@ -199,9 +200,9 @@ func (s *Strategy) ensureRefsUpToDate(ctx context.Context, c *clone) error {
 
 	logger.InfoContext(ctx, "Upstream has new or updated refs, fetching")
 	err = s.executeFetch(ctx, c)
-	if err == nil {
+	if err != nil {
 		c.mu.Lock()
-		c.refCheckValid = true
+		c.refCheckValid = false
 		c.mu.Unlock()
 	}
 	return err
