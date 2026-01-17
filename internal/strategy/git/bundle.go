@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/textproto"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/alecthomas/errors"
@@ -90,8 +91,9 @@ func (s *Strategy) generateAndUploadBundle(ctx context.Context, c *clone) {
 
 	// Stream bundle directly to cache
 	// #nosec G204 - c.path is controlled by us
-	cmd, err := gitCommand(ctx, "", "-C", c.path,
-		"bundle", "create", "-", "--branches")
+	// Use --branches --remotes to include all branches but exclude tags (which can be massive)
+	args := []string{"-C", c.path, "bundle", "create", "-", "--branches", "--remotes"}
+	cmd, err := gitCommand(ctx, "", args...)
 	if err != nil {
 		logger.ErrorContext(ctx, "Failed to create git command",
 			slog.String("upstream", c.upstreamURL),
@@ -109,6 +111,10 @@ func (s *Strategy) generateAndUploadBundle(ctx context.Context, c *clone) {
 		return
 	}
 
+	logger.DebugContext(ctx, "Starting bundle generation",
+		slog.String("upstream", c.upstreamURL),
+		slog.String("command", "git "+strings.Join(args, " ")))
+
 	if err := cmd.Start(); err != nil {
 		logger.ErrorContext(ctx, "Failed to start bundle generation",
 			slog.String("upstream", c.upstreamURL),
@@ -124,6 +130,12 @@ func (s *Strategy) generateAndUploadBundle(ctx context.Context, c *clone) {
 			slog.String("error", err.Error()),
 			slog.String("stderr", string(stderr)))
 		return
+	}
+
+	if len(stderr) > 0 {
+		logger.DebugContext(ctx, "Bundle generation stderr",
+			slog.String("upstream", c.upstreamURL),
+			slog.String("stderr", string(stderr)))
 	}
 
 	logger.InfoContext(ctx, "Bundle uploaded successfully",
