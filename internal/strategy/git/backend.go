@@ -2,6 +2,7 @@ package git
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
@@ -40,17 +41,37 @@ func (s *Strategy) serveFromBackend(w http.ResponseWriter, r *http.Request, c *c
 	host := r.PathValue("host")
 	pathValue := r.PathValue("path")
 
-	// git http-backend expects the path as-is: /host/repo.git/info/refs
-	backendPath := "/" + host + "/" + pathValue
+	// For regular clones, we need to insert /.git before the git protocol paths
+	// Find where the git operation starts (e.g., /info/refs, /git-upload-pack)
+	var gitOperation string
+	var repoPathWithSuffix string
+
+	for _, op := range []string{"/info/refs", "/git-upload-pack", "/git-receive-pack"} {
+		if idx := strings.Index(pathValue, op); idx != -1 {
+			repoPathWithSuffix = pathValue[:idx]
+			gitOperation = pathValue[idx:]
+			break
+		}
+	}
+
+	// Remove .git suffix from repo path for the filesystem path
+	repoPath := strings.TrimSuffix(repoPathWithSuffix, ".git")
+
+	// Construct backend path with .git directory: /host/repo/.git/info/refs
+	backendPath := "/" + host + "/" + repoPath + "/.git" + gitOperation
 
 	logger.DebugContext(r.Context(), "Serving with git http-backend",
 		slog.String("original_path", r.URL.Path),
 		slog.String("backend_path", backendPath),
 		slog.String("clone_path", c.path))
 
+	// Capture stderr from git http-backend to log errors
+	var stderrBuf bytes.Buffer
+
 	handler := &cgi.Handler{
-		Path: gitPath,
-		Args: []string{"http-backend"},
+		Path:   gitPath,
+		Args:   []string{"http-backend"},
+		Stderr: &stderrBuf,
 		Env: []string{
 			"GIT_PROJECT_ROOT=" + absRoot,
 			"GIT_HTTP_EXPORT_ALL=1",
@@ -63,9 +84,16 @@ func (s *Strategy) serveFromBackend(w http.ResponseWriter, r *http.Request, c *c
 	r2.URL.Path = backendPath
 
 	handler.ServeHTTP(w, r2)
+
+	// Log stderr if there was any output (indicates an error)
+	if stderrBuf.Len() > 0 {
+		logger.ErrorContext(r.Context(), "git http-backend error",
+			slog.String("stderr", stderrBuf.String()),
+			slog.String("path", backendPath))
+	}
 }
 
-// executeClone performs a git clone --bare operation.
+// executeClone performs a git clone operation.
 func (s *Strategy) executeClone(ctx context.Context, c *clone) error {
 	logger := logging.FromContext(ctx)
 
@@ -75,7 +103,7 @@ func (s *Strategy) executeClone(ctx context.Context, c *clone) error {
 
 	// #nosec G204 - c.upstreamURL and c.path are controlled by us
 	// Configure git for large repositories to avoid network buffer issues
-	args := []string{"clone", "--bare"}
+	args := []string{"clone"}
 	if s.config.CloneDepth > 0 {
 		args = append(args, "--depth", strconv.Itoa(s.config.CloneDepth))
 	}
@@ -96,11 +124,40 @@ func (s *Strategy) executeClone(ctx context.Context, c *clone) error {
 		return errors.Wrap(err, "git clone")
 	}
 
-	logger.DebugContext(ctx, "git clone succeeded", slog.String("output", string(output)))
+	// Configure remote to fetch all branches, not just the default branch
+	// git clone sets fetch = +refs/heads/master:refs/remotes/origin/master by default
+	// We need to change it to fetch all branches
+	// #nosec G204 - c.path is controlled by us
+	cmd = exec.CommandContext(ctx, "git", "-C", c.path, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		logger.ErrorContext(ctx, "git config failed",
+			slog.String("error", err.Error()),
+			slog.String("output", string(output)))
+		return errors.Wrap(err, "configure fetch refspec")
+	}
+
+	// Fetch all branches now that the refspec is configured
+	cmd, err = gitCommand(ctx, c.upstreamURL, "-C", c.path,
+		"-c", "http.postBuffer=524288000",
+		"-c", "http.lowSpeedLimit=1000",
+		"-c", "http.lowSpeedTime=600",
+		"fetch", "--all")
+	if err != nil {
+		return errors.Wrap(err, "create git command for fetch")
+	}
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		logger.ErrorContext(ctx, "git fetch --all failed",
+			slog.String("error", err.Error()),
+			slog.String("output", string(output)))
+		return errors.Wrap(err, "fetch all branches")
+	}
+
 	return nil
 }
 
-// executeFetch performs a git fetch --all operation.
+// executeFetch performs a git remote update operation.
 func (s *Strategy) executeFetch(ctx context.Context, c *clone) error {
 	logger := logging.FromContext(ctx)
 
@@ -193,10 +250,18 @@ func (s *Strategy) ensureRefsUpToDate(ctx context.Context, c *clone) error {
 		if strings.HasSuffix(ref, "^{}") {
 			continue
 		}
-		localSHA, exists := localRefs[ref]
+		// Only check refs/heads/* from upstream since those are what we fetch
+		// (GitHub exposes refs/pull/* and other refs we don't fetch)
+		if !strings.HasPrefix(ref, "refs/heads/") {
+			continue
+		}
+		// Convert refs/heads/X to refs/remotes/origin/X for local lookup
+		localRef := "refs/remotes/origin/" + strings.TrimPrefix(ref, "refs/heads/")
+		localSHA, exists := localRefs[localRef]
 		if !exists || localSHA != upstreamSHA {
 			logger.DebugContext(ctx, "Upstream ref differs from local",
-				slog.String("ref", ref),
+				slog.String("upstream_ref", ref),
+				slog.String("local_ref", localRef),
 				slog.String("upstream_sha", upstreamSHA),
 				slog.String("local_sha", localSHA))
 			needsFetch = true
@@ -225,14 +290,12 @@ func (s *Strategy) ensureRefsUpToDate(ctx context.Context, c *clone) error {
 // getLocalRefs returns a map of ref names to SHAs for the local clone.
 func (s *Strategy) getLocalRefs(ctx context.Context, c *clone) (map[string]string, error) {
 	// #nosec G204 - c.path is controlled by us
-	// Use --head to include HEAD symbolic ref
-	cmd, err := gitCommand(ctx, "", "-C", c.path, "show-ref", "--head")
-	if err != nil {
-		return nil, errors.Wrap(err, "create git command")
-	}
+	// Use for-each-ref to get all refs including remote refs
+	// No need for insteadOf protection since this is purely local
+	cmd := exec.CommandContext(ctx, "git", "-C", c.path, "for-each-ref", "--format=%(objectname) %(refname)")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, errors.Wrap(err, "git show-ref")
+		return nil, errors.Wrap(err, "git for-each-ref")
 	}
 
 	return ParseGitRefs(output), nil

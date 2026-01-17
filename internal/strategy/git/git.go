@@ -27,14 +27,14 @@ func init() {
 
 // Config for the Git strategy.
 type Config struct {
-	MirrorRoot       string        `hcl:"mirror-root" help:"Directory to store git mirrors." required:""`
+	MirrorRoot       string        `hcl:"mirror-root" help:"Directory to store git clones." required:""`
 	FetchInterval    time.Duration `hcl:"fetch-interval,optional" help:"How often to fetch from upstream in minutes." default:"15m"`
 	RefCheckInterval time.Duration `hcl:"ref-check-interval,optional" help:"How long to cache ref checks." default:"10s"`
 	BundleInterval   time.Duration `hcl:"bundle-interval,optional" help:"How often to generate bundles. 0 disables bundling." default:"0"`
 	CloneDepth       int           `hcl:"clone-depth,optional" help:"Depth for shallow clones. 0 means full clone." default:"0"`
 }
 
-// cloneState represents the current state of a bare clone.
+// cloneState represents the current state of a clone.
 type cloneState int
 
 const (
@@ -43,7 +43,7 @@ const (
 	stateReady                     // Clone is ready to serve
 )
 
-// clone represents a bare clone of an upstream repository.
+// clone represents a checked out clone of an upstream repository.
 type clone struct {
 	mu            sync.RWMutex
 	state         cloneState
@@ -292,7 +292,9 @@ func (s *Strategy) getOrCreateClone(ctx context.Context, upstreamURL string) *cl
 	}
 
 	// Check if clone already exists on disk (from previous run)
-	if _, err := os.Stat(clonePath); err == nil {
+	// Verify it has a .git directory to ensure it's a valid clone
+	gitDir := filepath.Join(clonePath, ".git")
+	if _, err := os.Stat(gitDir); err == nil {
 		c.state = stateReady
 		logging.FromContext(ctx).DebugContext(ctx, "Found existing clone on disk",
 			slog.String("path", clonePath))
@@ -315,12 +317,12 @@ func (s *Strategy) clonePathForURL(upstreamURL string) string {
 	parsed, err := url.Parse(upstreamURL)
 	if err != nil {
 		// Fallback to simple hash if URL parsing fails
-		return filepath.Join(s.config.MirrorRoot, "unknown.git")
+		return filepath.Join(s.config.MirrorRoot, "unknown")
 	}
 
-	// Create path: {mirror_root}/{host}/{path}.git
+	// Create path: {mirror_root}/{host}/{path}
 	repoPath := strings.TrimSuffix(parsed.Path, ".git")
-	return filepath.Join(s.config.MirrorRoot, parsed.Host, repoPath+".git")
+	return filepath.Join(s.config.MirrorRoot, parsed.Host, repoPath)
 }
 
 // discoverExistingClones scans the mirror root for existing clones and starts bundle loops.
@@ -338,10 +340,19 @@ func (s *Strategy) discoverExistingClones(ctx context.Context) error {
 			return nil
 		}
 
-		// Check if this directory is a bare git repository by looking for HEAD file
-		headPath := filepath.Join(path, "HEAD")
+		// Check if this directory is a git repository by looking for .git directory or HEAD file
+		gitDir := filepath.Join(path, ".git")
+		headPath := filepath.Join(path, ".git", "HEAD")
+		if _, statErr := os.Stat(gitDir); statErr != nil {
+			// Skip if .git doesn't exist (not a git repo)
+			if errors.Is(statErr, os.ErrNotExist) {
+				return nil
+			}
+			// Return other errors
+			return errors.Wrap(statErr, "stat .git directory")
+		}
 		if _, statErr := os.Stat(headPath); statErr != nil {
-			// Skip if HEAD doesn't exist (not a git repo)
+			// Skip if HEAD doesn't exist (not a valid git repo)
 			if errors.Is(statErr, os.ErrNotExist) {
 				return nil
 			}
@@ -365,7 +376,7 @@ func (s *Strategy) discoverExistingClones(ctx context.Context) error {
 		}
 
 		host := parts[0]
-		repoPath := strings.TrimSuffix(strings.Join(parts[1:], "/"), ".git")
+		repoPath := strings.Join(parts[1:], "/")
 		upstreamURL := "https://" + host + "/" + repoPath
 
 		// Create clone entry
