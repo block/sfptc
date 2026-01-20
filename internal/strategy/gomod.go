@@ -76,12 +76,8 @@ func NewGoMod(ctx context.Context, config GoModConfig, cache cache.Cache, mux Mu
 		CacheKey(func(r *http.Request) string {
 			return g.buildUpstreamURL(r).String()
 		}).
-		Transform(func(r *http.Request) (*http.Request, error) {
-			return g.transformRequest(r)
-		}).
-		TTL(func(r *http.Request) time.Duration {
-			return g.calculateTTL(r)
-		})
+		Transform(g.transformRequest).
+		TTL(g.calculateTTL)
 
 	// Register a catch-all handler that filters for Go module proxy patterns
 	mux.Handle("GET /{path...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
