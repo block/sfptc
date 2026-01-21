@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	Register("github-releases", NewGitHubReleases)
+	Register("github-releases", "Caches public and authenticated GitHub releases.", NewGitHubReleases)
 }
 
 type GitHubReleasesConfig struct {

@@ -16,28 +16,52 @@ import (
 // ErrNotFound is returned when a cache backend is not found.
 var ErrNotFound = errors.New("cache backend not found")
 
-var registry = map[string]func(ctx context.Context, config *hcl.Block) (Cache, error){}
+type registryEntry struct {
+	schema  *hcl.Block
+	factory func(ctx context.Context, config *hcl.Block) (Cache, error)
+}
+
+var registry = map[string]registryEntry{}
 
 // Factory is a function that creates a new cache instance from the given hcl-tagged configuration struct.
 type Factory[Config any, C Cache] func(ctx context.Context, config Config) (C, error)
 
 // Register a cache factory function.
-func Register[Config any, C Cache](id string, factory Factory[Config, C]) {
-	registry[id] = func(ctx context.Context, config *hcl.Block) (Cache, error) {
-		var cfg Config
-		if err := hcl.UnmarshalBlock(config, &cfg); err != nil {
-			return nil, errors.WithStack(err)
-		}
-		return factory(ctx, cfg)
+func Register[Config any, C Cache](id, description string, factory Factory[Config, C]) {
+	var c Config
+	schema, err := hcl.BlockSchema(id, &c)
+	if err != nil {
+		panic(err)
 	}
+	block := schema.Entries[0].(*hcl.Block)
+	block.Comments = hcl.CommentList{description}
+	registry[id] = registryEntry{
+		schema: block,
+		factory: func(ctx context.Context, config *hcl.Block) (Cache, error) {
+			var cfg Config
+			if err := hcl.UnmarshalBlock(config, &cfg); err != nil {
+				return nil, errors.WithStack(err)
+			}
+			return factory(ctx, cfg)
+		},
+	}
+}
+
+// Schema returns the schema for all registered cache backends.
+func Schema() *hcl.AST {
+	ast := &hcl.AST{}
+	for _, entry := range registry {
+		ast.Entries = append(ast.Entries, entry.schema)
+	}
+	return ast
 }
 
 // Create a new cache instance from the given name and configuration.
 //
 // Will return "ErrNotFound" if the cache backend is not found.
 func Create(ctx context.Context, name string, config *hcl.Block) (Cache, error) {
-	if factory, ok := registry[name]; ok {
-		return errors.WithStack2(factory(ctx, config))
+	if entry, ok := registry[name]; ok {
+		return errors.WithStack2(entry.factory(ctx, config))
 	}
 	return nil, errors.Errorf("%s: %w", name, ErrNotFound)
 }

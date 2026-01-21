@@ -14,7 +14,7 @@ import (
 )
 
 func init() {
-	Register("host", NewHost)
+	Register("host", "A generic host-based proxying strategy.", NewHost)
 }
 
 // HostConfig represents the configuration for the Host strategy.
