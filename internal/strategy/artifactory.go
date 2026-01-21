@@ -16,7 +16,7 @@ import (
 )
 
 func init() {
-	Register("artifactory", NewArtifactory)
+	Register("artifactory", "Caches artifacts from an Artifactory server.", NewArtifactory)
 }
 
 // ArtifactoryConfig represents the configuration for the Artifactory strategy.

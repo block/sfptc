@@ -23,7 +23,7 @@ import (
 )
 
 func init() {
-	strategy.Register("git", New)
+	strategy.Register("git", "Caches Git repositories, including bundle and tarball snapshots.", New)
 }
 
 type Config struct {

@@ -17,7 +17,7 @@ import (
 )
 
 func init() {
-	Register("apiv1", NewAPIV1)
+	Register("apiv1", "The stable API of the cache server.", NewAPIV1)
 }
 
 var _ Strategy = (*APIV1)(nil)
