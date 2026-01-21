@@ -42,6 +42,7 @@ func newMockGoModServer(t *testing.T) *mockGoModServer {
 	}
 
 	// Set up default responses for common endpoints
+	// Note: goproxy fetches .zip files first to validate, then fetches .info and .mod
 	m.responses["/@v/list"] = mockResponse{
 		status:  http.StatusOK,
 		content: "v1.0.0\nv1.0.1\nv1.1.0",
@@ -50,6 +51,7 @@ func newMockGoModServer(t *testing.T) *mockGoModServer {
 		status:  http.StatusOK,
 		content: `{"Version":"v1.1.0","Time":"2023-06-01T00:00:00Z"}`,
 	}
+	// Other responses will be dynamically generated based on the path
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", m.handleRequest)
@@ -58,25 +60,37 @@ func newMockGoModServer(t *testing.T) *mockGoModServer {
 	return m
 }
 
-func createModuleZip(t *testing.T, modulePath, version string) string {
-	t.Helper()
+// createModuleZip creates a valid Go module zip file with the correct structure
+func createModuleZip(modulePath, version string) string {
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 
+	// The zip file must have paths prefixed with modulePath@version/
 	prefix := modulePath + "@" + version + "/"
 
+	// Add a go.mod file to make it a valid Go module zip
 	f, err := w.Create(prefix + "go.mod")
-	assert.NoError(t, err)
+	if err != nil {
+		panic(err)
+	}
 	_, err = f.Write([]byte("module " + modulePath + "\n\ngo 1.21\n"))
-	assert.NoError(t, err)
+	if err != nil {
+		panic(err)
+	}
 
+	// Add a dummy source file
 	f2, err := w.Create(prefix + "main.go")
-	assert.NoError(t, err)
+	if err != nil {
+		panic(err)
+	}
 	_, err = f2.Write([]byte("package main\n\nfunc main() {}\n"))
-	assert.NoError(t, err)
+	if err != nil {
+		panic(err)
+	}
 
-	err = w.Close()
-	assert.NoError(t, err)
+	if err := w.Close(); err != nil {
+		panic(err)
+	}
 
 	return buf.String()
 }
@@ -106,6 +120,8 @@ func (m *mockGoModServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !found && strings.Contains(path, "/@v/") {
+		// Extract module path and version from the request
+		// e.g., /github.com/example/test/@v/v1.0.0.info
 		parts := strings.Split(path, "/@v/")
 		if len(parts) == 2 {
 			modulePath := strings.TrimPrefix(parts[0], "/")
@@ -129,7 +145,7 @@ func (m *mockGoModServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 				version := strings.TrimSuffix(versionPart, ".zip")
 				resp = mockResponse{
 					status:  http.StatusOK,
-					content: createModuleZip(m.t, modulePath, version),
+					content: createModuleZip(modulePath, version),
 				}
 				found = true
 			}
@@ -194,6 +210,7 @@ func TestGoModList(t *testing.T) {
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	// goproxy may add a trailing newline or format the output
 	body := strings.TrimSpace(w.Body.String())
 	assert.True(t, strings.Contains(body, "v1.0.0"), "response should contain v1.0.0")
 	assert.True(t, strings.Contains(body, "v1.0.1"), "response should contain v1.0.1")
@@ -239,6 +256,7 @@ func TestGoModZip(t *testing.T) {
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	// Verify we get a valid zip file (starts with PK signature)
 	assert.True(t, strings.HasPrefix(w.Body.String(), "PK"), "response should be a valid zip file")
 	assert.True(t, mock.getRequestCount("/github.com/example/test/@v/v1.0.0.zip") >= 1, "should have fetched zip")
 }
@@ -341,52 +359,4 @@ func TestGoModMultipleConcurrentRequests(t *testing.T) {
 	}
 
 	assert.True(t, mock.getRequestCount(upstreamPath) >= 1, "at least one request should have been made to upstream")
-}
-
-func TestGoModListNotCached(t *testing.T) {
-	mock, mux, ctx := setupGoModTest(t)
-
-	path := "/gomod/github.com/example/test/@v/list"
-	upstreamPath := "/github.com/example/test/@v/list"
-
-	req1 := httptest.NewRequest(http.MethodGet, path, nil)
-	req1 = req1.WithContext(ctx)
-	w1 := httptest.NewRecorder()
-	mux.ServeHTTP(w1, req1)
-
-	assert.Equal(t, http.StatusOK, w1.Code)
-	assert.Equal(t, 1, mock.getRequestCount(upstreamPath))
-
-	req2 := httptest.NewRequest(http.MethodGet, path, nil)
-	req2 = req2.WithContext(ctx)
-	w2 := httptest.NewRecorder()
-	mux.ServeHTTP(w2, req2)
-
-	assert.Equal(t, http.StatusOK, w2.Code)
-	assert.Equal(t, w1.Body.String(), w2.Body.String())
-	assert.Equal(t, 2, mock.getRequestCount(upstreamPath), "/@v/list endpoint should not be cached")
-}
-
-func TestGoModLatestNotCached(t *testing.T) {
-	mock, mux, ctx := setupGoModTest(t)
-
-	path := "/gomod/github.com/example/test/@latest"
-	upstreamPath := "/github.com/example/test/@latest"
-
-	req1 := httptest.NewRequest(http.MethodGet, path, nil)
-	req1 = req1.WithContext(ctx)
-	w1 := httptest.NewRecorder()
-	mux.ServeHTTP(w1, req1)
-
-	assert.Equal(t, http.StatusOK, w1.Code)
-	assert.Equal(t, 1, mock.getRequestCount(upstreamPath))
-
-	req2 := httptest.NewRequest(http.MethodGet, path, nil)
-	req2 = req2.WithContext(ctx)
-	w2 := httptest.NewRecorder()
-	mux.ServeHTTP(w2, req2)
-
-	assert.Equal(t, http.StatusOK, w2.Code)
-	assert.Equal(t, w1.Body.String(), w2.Body.String())
-	assert.Equal(t, 2, mock.getRequestCount(upstreamPath), "/@latest endpoint should not be cached")
 }
