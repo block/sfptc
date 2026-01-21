@@ -80,8 +80,8 @@ func NewGoMod(ctx context.Context, scheduler jobscheduler.Scheduler, config GoMo
 		Transform(g.transformRequest).
 		TTL(g.calculateTTL)
 
-	// Register a catch-all handler that filters for Go module proxy patterns
-	mux.Handle("GET /{path...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Register a namespaced handler for Go module proxy patterns
+	mux.Handle("GET /gomod/{path...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		// Check if this is a valid Go module proxy endpoint
 		if g.isGoModulePath(path) {
@@ -96,6 +96,9 @@ func NewGoMod(ctx context.Context, scheduler jobscheduler.Scheduler, config GoMo
 
 // isGoModulePath checks if the path matches a valid Go module proxy endpoint pattern.
 func (g *GoMod) isGoModulePath(path string) bool {
+	// Strip the /gomod prefix before checking the pattern
+	path = strings.TrimPrefix(path, "/gomod")
+
 	// Valid patterns:
 	// - /@v/list
 	// - /@v/{version}.info
@@ -117,8 +120,10 @@ func (g *GoMod) String() string {
 // buildUpstreamURL constructs the full upstream URL from the incoming request.
 func (g *GoMod) buildUpstreamURL(r *http.Request) *url.URL {
 	// The full path includes the module path and the endpoint
-	// e.g., /github.com/user/repo/@v/v1.0.0.info
+	// e.g., /gomod/github.com/user/repo/@v/v1.0.0.info
+	// We need to strip the /gomod prefix before forwarding to the upstream proxy
 	path := r.URL.Path
+	path = strings.TrimPrefix(path, "/gomod")
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}

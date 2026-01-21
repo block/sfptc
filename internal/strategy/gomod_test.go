@@ -159,7 +159,7 @@ func setupGoModTest(t *testing.T) (*mockGoModServer, *http.ServeMux, context.Con
 func TestGoModList(t *testing.T) {
 	mock, mux, ctx := setupGoModTest(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/github.com/example/test/@v/list", nil)
+	req := httptest.NewRequest(http.MethodGet, "/gomod/github.com/example/test/@v/list", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -173,7 +173,7 @@ func TestGoModList(t *testing.T) {
 func TestGoModInfo(t *testing.T) {
 	mock, mux, ctx := setupGoModTest(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/github.com/example/test/@v/v1.0.0.info", nil)
+	req := httptest.NewRequest(http.MethodGet, "/gomod/github.com/example/test/@v/v1.0.0.info", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -187,7 +187,7 @@ func TestGoModInfo(t *testing.T) {
 func TestGoModMod(t *testing.T) {
 	mock, mux, ctx := setupGoModTest(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/github.com/example/test/@v/v1.0.0.mod", nil)
+	req := httptest.NewRequest(http.MethodGet, "/gomod/github.com/example/test/@v/v1.0.0.mod", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -201,7 +201,7 @@ func TestGoModMod(t *testing.T) {
 func TestGoModZip(t *testing.T) {
 	mock, mux, ctx := setupGoModTest(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/github.com/example/test/@v/v1.0.0.zip", nil)
+	req := httptest.NewRequest(http.MethodGet, "/gomod/github.com/example/test/@v/v1.0.0.zip", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -215,7 +215,7 @@ func TestGoModZip(t *testing.T) {
 func TestGoModLatest(t *testing.T) {
 	mock, mux, ctx := setupGoModTest(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/github.com/example/test/@latest", nil)
+	req := httptest.NewRequest(http.MethodGet, "/gomod/github.com/example/test/@latest", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -229,7 +229,8 @@ func TestGoModLatest(t *testing.T) {
 func TestGoModCaching(t *testing.T) {
 	mock, mux, ctx := setupGoModTest(t)
 
-	path := "/github.com/example/test/@v/v1.0.0.info"
+	path := "/gomod/github.com/example/test/@v/v1.0.0.info"
+	upstreamPath := "/github.com/example/test/@v/v1.0.0.info"
 
 	// First request
 	req1 := httptest.NewRequest(http.MethodGet, path, nil)
@@ -238,7 +239,7 @@ func TestGoModCaching(t *testing.T) {
 	mux.ServeHTTP(w1, req1)
 
 	assert.Equal(t, http.StatusOK, w1.Code)
-	assert.Equal(t, 1, mock.requestCount[path])
+	assert.Equal(t, 1, mock.requestCount[upstreamPath])
 
 	// Second request should hit cache
 	req2 := httptest.NewRequest(http.MethodGet, path, nil)
@@ -248,14 +249,14 @@ func TestGoModCaching(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w2.Code)
 	assert.Equal(t, w1.Body.String(), w2.Body.String())
-	assert.Equal(t, 1, mock.requestCount[path], "second request should be served from cache")
+	assert.Equal(t, 1, mock.requestCount[upstreamPath], "second request should be served from cache")
 }
 
 func TestGoModComplexModulePath(t *testing.T) {
 	mock, mux, ctx := setupGoModTest(t)
 
 	// Test module path with multiple slashes
-	req := httptest.NewRequest(http.MethodGet, "/golang.org/x/tools/@v/v0.1.0.info", nil)
+	req := httptest.NewRequest(http.MethodGet, "/gomod/golang.org/x/tools/@v/v0.1.0.info", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -269,8 +270,9 @@ func TestGoModNonOKResponse(t *testing.T) {
 	mock, mux, ctx := setupGoModTest(t)
 
 	// Set up 404 response
-	notFoundPath := "/github.com/example/nonexistent/@v/v99.0.0.info"
-	mock.setResponse(notFoundPath, http.StatusNotFound, "not found")
+	upstreamPath := "/github.com/example/nonexistent/@v/v99.0.0.info"
+	notFoundPath := "/gomod" + upstreamPath
+	mock.setResponse(upstreamPath, http.StatusNotFound, "not found")
 
 	// First request should return 404
 	req1 := httptest.NewRequest(http.MethodGet, notFoundPath, nil)
@@ -279,7 +281,7 @@ func TestGoModNonOKResponse(t *testing.T) {
 	mux.ServeHTTP(w1, req1)
 
 	assert.Equal(t, http.StatusNotFound, w1.Code)
-	assert.Equal(t, 1, mock.requestCount[notFoundPath])
+	assert.Equal(t, 1, mock.requestCount[upstreamPath])
 
 	// Second request should also hit upstream (404s are not cached)
 	req2 := httptest.NewRequest(http.MethodGet, notFoundPath, nil)
@@ -288,13 +290,14 @@ func TestGoModNonOKResponse(t *testing.T) {
 	mux.ServeHTTP(w2, req2)
 
 	assert.Equal(t, http.StatusNotFound, w2.Code)
-	assert.Equal(t, 2, mock.requestCount[notFoundPath], "404 responses should not be cached")
+	assert.Equal(t, 2, mock.requestCount[upstreamPath], "404 responses should not be cached")
 }
 
 func TestGoModMultipleConcurrentRequests(t *testing.T) {
 	mock, mux, ctx := setupGoModTest(t)
 
-	path := "/github.com/example/test/@v/v1.0.0.zip"
+	path := "/gomod/github.com/example/test/@v/v1.0.0.zip"
+	upstreamPath := "/github.com/example/test/@v/v1.0.0.zip"
 
 	// Make multiple concurrent requests
 	results := make(chan *httptest.ResponseRecorder, 3)
@@ -317,5 +320,5 @@ func TestGoModMultipleConcurrentRequests(t *testing.T) {
 	// First request should have created the cache entry
 	// Subsequent requests might hit cache or might be in-flight
 	// We just verify all requests succeeded
-	assert.True(t, mock.requestCount[path] >= 1, "at least one request should have been made to upstream")
+	assert.True(t, mock.requestCount[upstreamPath] >= 1, "at least one request should have been made to upstream")
 }
