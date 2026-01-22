@@ -45,7 +45,7 @@ func (g *goproxyCacher) Get(ctx context.Context, name string) (io.ReadCloser, er
 // it represents mutable or immutable content.
 func (g *goproxyCacher) Put(ctx context.Context, name string, content io.ReadSeeker) error {
 	// Hash the name to create a cache key
-	key := cache.Key(sha256.Sum256([]byte(name)))
+	key := cache.NewKey(name)
 
 	// Determine TTL based on the endpoint type
 	ttl := g.calculateTTL(name)
