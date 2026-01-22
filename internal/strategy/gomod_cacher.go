@@ -27,7 +27,7 @@ type goproxyCacher struct {
 // as a signal to fetch from upstream.
 func (g *goproxyCacher) Get(ctx context.Context, name string) (io.ReadCloser, error) {
 	// Hash the name to create a cache key that matches cachew's format
-	key := cache.Key(sha256.Sum256([]byte(name)))
+	key := cache.NewKey(name)
 
 	// Try to open the cached content
 	rc, _, err := g.cache.Open(ctx, key)
