@@ -42,7 +42,6 @@ func newMockGoModServer(t *testing.T) *mockGoModServer {
 	}
 
 	// Set up default responses for common endpoints
-	// Note: goproxy fetches .zip files first to validate, then fetches .info and .mod
 	m.responses["/@v/list"] = mockResponse{
 		status:  http.StatusOK,
 		content: "v1.0.0\nv1.0.1\nv1.1.0",
@@ -51,7 +50,6 @@ func newMockGoModServer(t *testing.T) *mockGoModServer {
 		status:  http.StatusOK,
 		content: `{"Version":"v1.1.0","Time":"2023-06-01T00:00:00Z"}`,
 	}
-	// Other responses will be dynamically generated based on the path
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", m.handleRequest)
@@ -60,15 +58,12 @@ func newMockGoModServer(t *testing.T) *mockGoModServer {
 	return m
 }
 
-// createModuleZip creates a valid Go module zip file with the correct structure
 func createModuleZip(modulePath, version string) string {
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 
-	// The zip file must have paths prefixed with modulePath@version/
 	prefix := modulePath + "@" + version + "/"
 
-	// Add a go.mod file to make it a valid Go module zip
 	f, err := w.Create(prefix + "go.mod")
 	if err != nil {
 		panic(err)
@@ -78,7 +73,6 @@ func createModuleZip(modulePath, version string) string {
 		panic(err)
 	}
 
-	// Add a dummy source file
 	f2, err := w.Create(prefix + "main.go")
 	if err != nil {
 		panic(err)
@@ -120,8 +114,6 @@ func (m *mockGoModServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !found && strings.Contains(path, "/@v/") {
-		// Extract module path and version from the request
-		// e.g., /github.com/example/test/@v/v1.0.0.info
 		parts := strings.Split(path, "/@v/")
 		if len(parts) == 2 {
 			modulePath := strings.TrimPrefix(parts[0], "/")
@@ -210,7 +202,6 @@ func TestGoModList(t *testing.T) {
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	// goproxy may add a trailing newline or format the output
 	body := strings.TrimSpace(w.Body.String())
 	assert.True(t, strings.Contains(body, "v1.0.0"), "response should contain v1.0.0")
 	assert.True(t, strings.Contains(body, "v1.0.1"), "response should contain v1.0.1")
@@ -256,7 +247,6 @@ func TestGoModZip(t *testing.T) {
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	// Verify we get a valid zip file (starts with PK signature)
 	assert.True(t, strings.HasPrefix(w.Body.String(), "PK"), "response should be a valid zip file")
 	assert.True(t, mock.getRequestCount("/github.com/example/test/@v/v1.0.0.zip") >= 1, "should have fetched zip")
 }
