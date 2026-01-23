@@ -19,15 +19,17 @@ func init() {
 }
 
 type GoModConfig struct {
-	Proxy string `hcl:"proxy,optional" help:"Upstream Go module proxy URL (defaults to proxy.golang.org)" default:"https://proxy.golang.org"`
+	Proxy        string   `hcl:"proxy,optional" help:"Upstream Go module proxy URL (defaults to proxy.golang.org)" default:"https://proxy.golang.org"`
+	PrivatePaths []string `hcl:"private-paths,optional" help:"Module path patterns for private repositories"`
 }
 
 type GoMod struct {
-	config  GoModConfig
-	cache   cache.Cache
-	logger  *slog.Logger
-	proxy   *url.URL
-	goproxy *goproxy.Goproxy
+	config      GoModConfig
+	cache       cache.Cache
+	logger      *slog.Logger
+	proxy       *url.URL
+	goproxy     *goproxy.Goproxy
+	gitStrategy GitStrategy // Reference to git strategy for private repo access
 }
 
 var _ Strategy = (*GoMod)(nil)
@@ -45,14 +47,37 @@ func NewGoMod(ctx context.Context, config GoModConfig, _ jobscheduler.Scheduler,
 		proxy:  parsedURL,
 	}
 
-	g.goproxy = &goproxy.Goproxy{
-		Logger: g.logger,
-		Fetcher: &goproxy.GoFetcher{
-			Env: []string{
-				"GOPROXY=" + config.Proxy,
-				"GOSUMDB=off", // Disable checksum database validation in fetcher, to prevent unneccessary double validation
-			},
+	publicFetcher := &goproxy.GoFetcher{
+		Env: []string{
+			"GOPROXY=" + config.Proxy,
+			"GOSUMDB=off", // Disable checksum database validation in fetcher, to prevent unneccessary double validation
 		},
+	}
+
+	var fetcher goproxy.Fetcher = publicFetcher
+
+	if len(config.PrivatePaths) > 0 {
+		gitStrat := GetStrategy("git")
+		if gitStrat == nil {
+			g.logger.WarnContext(ctx, "Private paths configured but git strategy not found, private module support disabled")
+		} else {
+			gitStrategy, ok := gitStrat.(GitStrategy)
+			if !ok {
+				g.logger.WarnContext(ctx, "Git strategy does not implement GitStrategy interface, private module support disabled")
+			} else {
+				g.gitStrategy = gitStrategy
+				privateFetcher := newPrivateFetcher(g, gitStrategy)
+				fetcher = newCompositeFetcher(publicFetcher, privateFetcher, config.PrivatePaths)
+
+				g.logger.InfoContext(ctx, "Configured private module support",
+					slog.Any("private_paths", config.PrivatePaths))
+			}
+		}
+	}
+
+	g.goproxy = &goproxy.Goproxy{
+		Logger:  g.logger,
+		Fetcher: fetcher,
 		Cacher: &goproxyCacher{
 			cache: cache,
 		},
