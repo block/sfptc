@@ -244,20 +244,18 @@ func (r *Repository) Clone(ctx context.Context, config Config) error {
 		return nil
 	}
 	r.state = StateCloning
-	r.mu.Unlock()
 
 	err := r.executeClone(ctx, config)
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if err != nil {
 		r.state = StateEmpty
+		r.mu.Unlock()
 		return err
 	}
 
 	r.state = StateReady
 	r.lastFetch = time.Now()
+	r.mu.Unlock()
 	return nil
 }
 
@@ -402,9 +400,15 @@ func (r *Repository) EnsureRefsUpToDate(ctx context.Context, config Config) erro
 }
 
 func (r *Repository) GetLocalRefs(ctx context.Context) (map[string]string, error) {
+	var output []byte
+	var err error
+
+	r.mu.RLock()
 	// #nosec G204 - r.path is controlled by us
 	cmd := exec.CommandContext(ctx, "git", "-C", r.path, "for-each-ref", "--format=%(objectname) %(refname)")
-	output, err := cmd.CombinedOutput()
+	output, err = cmd.CombinedOutput()
+	r.mu.RUnlock()
+
 	if err != nil {
 		return nil, errors.Wrap(err, "git for-each-ref")
 	}
