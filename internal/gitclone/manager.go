@@ -231,6 +231,12 @@ func (r *Repository) NeedsFetch(fetchInterval time.Duration) bool {
 	return time.Since(r.lastFetch) >= fetchInterval
 }
 
+func (r *Repository) WithReadLock(fn func()) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	fn()
+}
+
 func (r *Repository) Clone(ctx context.Context, config Config) error {
 	r.mu.Lock()
 	if r.state != StateEmpty {
@@ -322,8 +328,6 @@ func (r *Repository) Fetch(ctx context.Context, config Config) error {
 	}
 
 	r.mu.Lock()
-	r.lastFetch = time.Now()
-	r.mu.Unlock()
 
 	// #nosec G204 - r.path is controlled by us
 	cmd, err := gitCommand(ctx, r.upstreamURL, "-C", r.path,
@@ -338,6 +342,9 @@ func (r *Repository) Fetch(ctx context.Context, config Config) error {
 	if err != nil {
 		return errors.Wrapf(err, "git remote update: %s", string(output))
 	}
+
+	r.lastFetch = time.Now()
+	r.mu.Unlock()
 
 	return nil
 }

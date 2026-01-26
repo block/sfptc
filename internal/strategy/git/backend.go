@@ -57,29 +57,31 @@ func (s *Strategy) serveFromBackend(w http.ResponseWriter, r *http.Request, repo
 		slog.String("backend_path", backendPath),
 		slog.String("clone_path", repo.Path()))
 
-	var stderrBuf bytes.Buffer
+	repo.WithReadLock(func() {
+		var stderrBuf bytes.Buffer
 
-	handler := &cgi.Handler{
-		Path:   gitPath,
-		Args:   []string{"http-backend"},
-		Stderr: &stderrBuf,
-		Env: []string{
-			"GIT_PROJECT_ROOT=" + absRoot,
-			"GIT_HTTP_EXPORT_ALL=1",
-			"PATH=" + os.Getenv("PATH"),
-		},
-	}
+		handler := &cgi.Handler{
+			Path:   gitPath,
+			Args:   []string{"http-backend"},
+			Stderr: &stderrBuf,
+			Env: []string{
+				"GIT_PROJECT_ROOT=" + absRoot,
+				"GIT_HTTP_EXPORT_ALL=1",
+				"PATH=" + os.Getenv("PATH"),
+			},
+		}
 
-	r2 := r.Clone(r.Context())
-	r2.URL.Path = backendPath
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = backendPath
 
-	handler.ServeHTTP(w, r2)
+		handler.ServeHTTP(w, r2)
 
-	if stderrBuf.Len() > 0 {
-		logger.ErrorContext(r.Context(), "git http-backend error",
-			slog.String("stderr", stderrBuf.String()),
-			slog.String("path", backendPath))
-	}
+		if stderrBuf.Len() > 0 {
+			logger.ErrorContext(r.Context(), "git http-backend error",
+				slog.String("stderr", stderrBuf.String()),
+				slog.String("path", backendPath))
+		}
+	})
 }
 
 func (s *Strategy) ensureRefsUpToDate(ctx context.Context, repo *gitclone.Repository) error {
