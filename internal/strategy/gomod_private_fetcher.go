@@ -202,6 +202,7 @@ func (p *privateFetcher) listVersions(ctx context.Context, repo *gitclone.Reposi
 	var err error
 
 	repo.WithReadLock(func() {
+		// #nosec G204 - repo.Path() is controlled by us
 		cmd := exec.CommandContext(ctx, "git", "-C", repo.Path(), "tag", "-l", "v*")
 		output, err = cmd.CombinedOutput()
 	})
@@ -230,6 +231,7 @@ func (p *privateFetcher) getCommitTime(ctx context.Context, repo *gitclone.Repos
 	var err error
 
 	repo.WithReadLock(func() {
+		// #nosec G204 - repo.Path() and ref are controlled by us
 		cmd := exec.CommandContext(ctx, "git", "-C", repo.Path(), "log", "-1", "--format=%cI", ref)
 		output, err = cmd.CombinedOutput()
 	})
@@ -248,6 +250,7 @@ func (p *privateFetcher) getDefaultBranchVersion(ctx context.Context, repo *gitc
 	var err error
 
 	repo.WithReadLock(func() {
+		// #nosec G204 - repo.Path() is controlled by us
 		cmd := exec.CommandContext(ctx, "git", "-C", repo.Path(), "rev-parse", "HEAD")
 		output, err = cmd.CombinedOutput()
 	})
