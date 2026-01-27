@@ -1,4 +1,4 @@
-package strategy
+package gomod
 
 import (
 	"context"
@@ -17,13 +17,14 @@ import (
 	"github.com/block/cachew/internal/gitclone"
 	"github.com/block/cachew/internal/jobscheduler"
 	"github.com/block/cachew/internal/logging"
+	"github.com/block/cachew/internal/strategy"
 )
 
 func init() {
-	Register("gomod", "Caches Go module proxy requests.", NewGoMod)
+	strategy.Register("gomod", "Caches Go module proxy requests.", New)
 }
 
-type GoModConfig struct {
+type Config struct {
 	Proxy            string        `hcl:"proxy,optional" help:"Upstream Go module proxy URL (defaults to proxy.golang.org)" default:"https://proxy.golang.org"`
 	PrivatePaths     []string      `hcl:"private-paths,optional" help:"Module path patterns for private repositories"`
 	MirrorRoot       string        `hcl:"mirror-root,optional" help:"Directory to store git clones for private repos." default:""`
@@ -32,8 +33,8 @@ type GoModConfig struct {
 	CloneDepth       int           `hcl:"clone-depth,optional" help:"Depth for shallow clones of private repos. 0 means full clone." default:"0"`
 }
 
-type GoMod struct {
-	config       GoModConfig
+type Strategy struct {
+	config       Config
 	cache        cache.Cache
 	logger       *slog.Logger
 	proxy        *url.URL
@@ -41,15 +42,15 @@ type GoMod struct {
 	cloneManager *gitclone.Manager // Manager for cloning private repositories
 }
 
-var _ Strategy = (*GoMod)(nil)
+var _ strategy.Strategy = (*Strategy)(nil)
 
-func NewGoMod(ctx context.Context, config GoModConfig, _ jobscheduler.Scheduler, cache cache.Cache, mux Mux) (*GoMod, error) {
+func New(ctx context.Context, config Config, _ jobscheduler.Scheduler, cache cache.Cache, mux strategy.Mux) (*Strategy, error) {
 	parsedURL, err := url.Parse(config.Proxy)
 	if err != nil {
 		return nil, fmt.Errorf("invalid proxy URL: %w", err)
 	}
 
-	g := &GoMod{
+	s := &Strategy{
 		config: config,
 		cache:  cache,
 		logger: logging.FromContext(ctx),
@@ -87,24 +88,24 @@ func NewGoMod(ctx context.Context, config GoModConfig, _ jobscheduler.Scheduler,
 		if err != nil {
 			return nil, errors.Wrap(err, "create clone manager for private repos")
 		}
-		g.cloneManager = cloneManager
+		s.cloneManager = cloneManager
 
 		// Discover existing clones
 		if err := cloneManager.DiscoverExisting(ctx); err != nil {
-			g.logger.WarnContext(ctx, "Failed to discover existing clones for private repos",
+			s.logger.WarnContext(ctx, "Failed to discover existing clones for private repos",
 				slog.String("error", err.Error()))
 		}
 
-		privateFetcher := newPrivateFetcher(g, cloneManager)
+		privateFetcher := newPrivateFetcher(s, cloneManager)
 		fetcher = newCompositeFetcher(publicFetcher, privateFetcher, config.PrivatePaths)
 
-		g.logger.InfoContext(ctx, "Configured private module support",
+		s.logger.InfoContext(ctx, "Configured private module support",
 			slog.Any("private_paths", config.PrivatePaths),
 			slog.String("mirror_root", mirrorRoot))
 	}
 
-	g.goproxy = &goproxy.Goproxy{
-		Logger:  g.logger,
+	s.goproxy = &goproxy.Goproxy{
+		Logger:  s.logger,
 		Fetcher: fetcher,
 		Cacher: &goproxyCacher{
 			cache: cache,
@@ -114,14 +115,14 @@ func NewGoMod(ctx context.Context, config GoModConfig, _ jobscheduler.Scheduler,
 		},
 	}
 
-	g.logger.InfoContext(ctx, "Initialized Go module proxy strategy",
-		slog.String("proxy", g.proxy.String()))
+	s.logger.InfoContext(ctx, "Initialized Go module proxy strategy",
+		slog.String("proxy", s.proxy.String()))
 
-	mux.Handle("GET /gomod/{path...}", http.StripPrefix("/gomod", g.goproxy))
+	mux.Handle("GET /gomod/{path...}", http.StripPrefix("/gomod", s.goproxy))
 
-	return g, nil
+	return s, nil
 }
 
-func (g *GoMod) String() string {
-	return "gomod:" + g.proxy.Host
+func (s *Strategy) String() string {
+	return "gomod:" + s.proxy.Host
 }

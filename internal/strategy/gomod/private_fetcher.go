@@ -1,4 +1,4 @@
-package strategy
+package gomod
 
 import (
 	"bytes"
@@ -19,11 +19,11 @@ import (
 )
 
 type privateFetcher struct {
-	gomod        *GoMod
+	gomod        *Strategy
 	cloneManager *gitclone.Manager
 }
 
-func newPrivateFetcher(gomod *GoMod, cloneManager *gitclone.Manager) *privateFetcher {
+func newPrivateFetcher(gomod *Strategy, cloneManager *gitclone.Manager) *privateFetcher {
 	return &privateFetcher{
 		gomod:        gomod,
 		cloneManager: cloneManager,

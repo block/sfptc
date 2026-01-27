@@ -1,4 +1,4 @@
-package strategy_test
+package gomod_test
 
 import (
 	"archive/zip"
@@ -17,7 +17,7 @@ import (
 	"github.com/block/cachew/internal/cache"
 	"github.com/block/cachew/internal/jobscheduler"
 	"github.com/block/cachew/internal/logging"
-	"github.com/block/cachew/internal/strategy"
+	"github.com/block/cachew/internal/strategy/gomod"
 )
 
 type mockGoModServer struct {
@@ -184,7 +184,7 @@ func setupGoModTest(t *testing.T) (*mockGoModServer, *http.ServeMux, context.Con
 	t.Cleanup(func() { _ = memCache.Close() })
 
 	mux := http.NewServeMux()
-	_, err = strategy.NewGoMod(ctx, strategy.GoModConfig{
+	_, err = gomod.New(ctx, gomod.Config{
 		Proxy: mock.server.URL,
 	}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
 	assert.NoError(t, err)
