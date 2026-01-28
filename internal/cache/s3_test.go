@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"log/slog"
+	"os"
 	"os/exec"
 	"testing"
 	"time"
@@ -154,5 +155,43 @@ func TestS3Cache(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		return c
+	})
+}
+
+func TestS3CacheSoak(t *testing.T) {
+	if os.Getenv("SOAK_TEST") == "" {
+		t.Skip("Skipping soak test; set SOAK_TEST=1 to run")
+	}
+
+	startRustfs(t)
+
+	_, ctx := logging.Configure(t.Context(), logging.Config{Level: slog.LevelError})
+
+	// Clean bucket to ensure test isolation
+	cleanBucket(t)
+
+	// Set credentials via environment variables for the AWS credential chain
+	t.Setenv("AWS_ACCESS_KEY_ID", rustfsUsername)
+	t.Setenv("AWS_SECRET_ACCESS_KEY", rustfsPassword)
+
+	c, err := cache.NewS3(ctx, cache.S3Config{
+		Endpoint:         rustfsAddr,
+		Bucket:           rustfsBucket,
+		Region:           "",
+		UseSSL:           false,
+		MaxTTL:           10 * time.Minute,
+		UploadPartSizeMB: 16,
+	})
+	assert.NoError(t, err)
+	defer c.Close()
+
+	cachetest.Soak(t, c, cachetest.SoakConfig{
+		Duration:         time.Minute,
+		NumObjects:       500,
+		MaxObjectSize:    512 * 1024,
+		MinObjectSize:    1024,
+		OverwritePercent: 30,
+		Concurrency:      8,
+		TTL:              5 * time.Minute,
 	})
 }

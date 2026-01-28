@@ -189,35 +189,33 @@ func doWrite(
 	size := config.MinObjectSize + rng.IntN(config.MaxObjectSize-config.MinObjectSize+1)
 	data := make([]byte, size)
 	if _, err := rand.Read(data); err != nil {
-		t.Errorf("failed to generate random data: %v", err)
+		t.Errorf("failed to generate random data: %+v", err)
 		return
 	}
 
 	key := cache.NewKey(fmt.Sprintf("soak-key-%d", keyIdx))
-
-	// Record hash before writing so concurrent reads can validate against it
-	hash := sha256.Sum256(data)
-	mu.Lock()
-	writtenHashes[keyIdx] = append(writtenHashes[keyIdx], hash)
-	mu.Unlock()
-
 	writer, err := c.Create(ctx, key, nil, config.TTL)
 	if err != nil {
-		t.Errorf("failed to create cache entry: %v", err)
+		t.Errorf("failed to create cache entry: %+v", err)
 		return
 	}
 
 	n, err := writer.Write(data)
 	if err != nil {
-		t.Errorf("failed to write cache entry: %v", err)
+		t.Errorf("failed to write cache entry: %+v", err)
 		_ = writer.Close()
 		return
 	}
 
 	if err := writer.Close(); err != nil {
-		t.Errorf("failed to close cache entry: %v", err)
+		t.Errorf("failed to close cache entry: %+v", err)
 		return
 	}
+
+	hash := sha256.Sum256(data)
+	mu.Lock()
+	writtenHashes[keyIdx] = append(writtenHashes[keyIdx], hash)
+	mu.Unlock()
 
 	atomic.AddInt64(&result.Writes, 1)
 	atomic.AddInt64(&result.BytesWritten, int64(n))
@@ -251,14 +249,14 @@ func doRead(
 			atomic.AddInt64(&result.Reads, 1)
 			return
 		}
-		t.Errorf("failed to open cache entry: %v", err)
+		t.Errorf("failed to open cache entry: %+v", err)
 		return
 	}
 	defer reader.Close()
 
 	data, err := io.ReadAll(reader)
 	if err != nil {
-		t.Errorf("failed to read cache entry: %v", err)
+		t.Errorf("failed to read cache entry: %+v", err)
 		return
 	}
 
@@ -293,7 +291,7 @@ func doDelete(
 		if errors.Is(err, os.ErrNotExist) {
 			return
 		}
-		t.Errorf("failed to delete cache entry: %v", err)
+		t.Errorf("failed to delete cache entry: %+v", err)
 		return
 	}
 
