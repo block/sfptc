@@ -262,6 +262,12 @@ func doRead(
 
 	data, err := io.ReadAll(reader)
 	if err != nil {
+		// Object may have been deleted between Open and Read - treat as miss
+		if errors.Is(err, os.ErrNotExist) {
+			atomic.AddInt64(&result.ReadMisses, 1)
+			atomic.AddInt64(&result.Reads, 1)
+			return
+		}
 		t.Errorf("failed to read cache entry: %+v", err)
 		return
 	}

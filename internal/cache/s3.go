@@ -168,7 +168,7 @@ func (s *S3) Stat(ctx context.Context, key Key) (http.Header, error) {
 	objInfo, err := s.client.StatObject(ctx, s.config.Bucket, objectName, minio.StatObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
+		if errResponse.Code == s3ErrNoSuchKey {
 			return nil, os.ErrNotExist
 		}
 		return nil, errors.Errorf("failed to stat object: %w", err)
@@ -211,7 +211,7 @@ func (s *S3) Open(ctx context.Context, key Key) (io.ReadCloser, http.Header, err
 	objInfo, err := s.client.StatObject(ctx, s.config.Bucket, objectName, minio.StatObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
+		if errResponse.Code == s3ErrNoSuchKey {
 			return nil, nil, os.ErrNotExist
 		}
 		return nil, nil, errors.Errorf("failed to stat object: %w", err)
@@ -247,7 +247,31 @@ func (s *S3) Open(ctx context.Context, key Key) (io.ReadCloser, http.Header, err
 		return nil, nil, errors.Errorf("failed to get object: %w", err)
 	}
 
-	return obj, headers, nil
+	return &s3Reader{obj: obj}, headers, nil
+}
+
+const s3ErrNoSuchKey = "NoSuchKey"
+
+// s3Reader wraps minio.Object to convert S3 errors to standard errors.
+type s3Reader struct {
+	obj *minio.Object
+}
+
+func (r *s3Reader) Read(p []byte) (int, error) {
+	n, err := r.obj.Read(p)
+	if err == nil || errors.Is(err, io.EOF) {
+		return n, err //nolint:wrapcheck
+	}
+	// Convert NoSuchKey to os.ErrNotExist for consistency
+	errResponse := minio.ToErrorResponse(err)
+	if errResponse.Code == s3ErrNoSuchKey {
+		return n, os.ErrNotExist
+	}
+	return n, errors.WithStack(err)
+}
+
+func (r *s3Reader) Close() error {
+	return errors.WithStack(r.obj.Close())
 }
 
 func (s *S3) Create(ctx context.Context, key Key, headers http.Header, ttl time.Duration) (io.WriteCloser, error) {
