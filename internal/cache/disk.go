@@ -421,6 +421,11 @@ func (w *diskWriter) Close() error {
 		return errors.Errorf("failed to create directory: %w", err)
 	}
 
+	// Check if we're overwriting an existing file and subtract its size
+	if info, err := os.Stat(w.path); err == nil {
+		w.disk.size.Add(-info.Size())
+	}
+
 	if err := os.Rename(w.tempPath, w.path); err != nil {
 		return errors.Errorf("failed to rename temp file: %w", err)
 	}
