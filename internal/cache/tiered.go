@@ -136,6 +136,9 @@ func (t Tiered) Stats(ctx context.Context) (Stats, error) {
 	var combined Stats
 	for _, c := range t.caches {
 		s, err := c.Stats(ctx)
+		if errors.Is(err, ErrStatsUnavailable) {
+			continue
+		}
 		if err != nil {
 			return Stats{}, errors.Wrap(err, c.String())
 		}

@@ -16,6 +16,9 @@ import (
 // ErrNotFound is returned when a cache backend is not found.
 var ErrNotFound = errors.New("cache backend not found")
 
+// ErrStatsUnavailable is returned when a cache backend cannot provide statistics.
+var ErrStatsUnavailable = errors.New("stats unavailable")
+
 type registryEntry struct {
 	schema  *hcl.Block
 	factory func(ctx context.Context, config *hcl.Block) (Cache, error)

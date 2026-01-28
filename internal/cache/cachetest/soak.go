@@ -313,29 +313,34 @@ func doDelete(
 }
 
 func verifyHealth(t *testing.T, c cache.Cache, result *SoakResult) {
-	stats, err := c.Stats(context.Background())
-	assert.NoError(t, err, "failed to get cache stats")
-
 	t.Logf("Soak test completed:")
 	t.Logf("  Duration: %v", result.Duration)
 	t.Logf("  Writes: %d (%.1f/sec)", result.Writes, float64(result.Writes)/result.Duration.Seconds())
 	t.Logf("  Reads: %d (hits: %d, misses: %d)", result.Reads, result.ReadHits, result.ReadMisses)
 	t.Logf("  Deletes: %d", result.Deletes)
 	t.Logf("  Bytes written: %d MB", result.BytesWritten/(1024*1024))
-	t.Logf("Cache stats:")
-	t.Logf("  Objects: %d", stats.Objects)
-	t.Logf("  Size: %d MB", stats.Size/(1024*1024))
-	t.Logf("  Capacity: %d MB", stats.Capacity/(1024*1024))
 	t.Logf("Memory stats:")
 	t.Logf("  Heap start: %.1f MB", float64(result.HeapAllocStart)/(1024*1024))
 	t.Logf("  Heap end: %.1f MB", float64(result.HeapAllocEnd)/(1024*1024))
 	t.Logf("  Total allocated: %.1f MB", float64(result.TotalAlloc)/(1024*1024))
 	t.Logf("  GC cycles: %d", result.NumGC)
 
-	// Verify size is within capacity
+	stats, err := c.Stats(context.Background())
+	if errors.Is(err, cache.ErrStatsUnavailable) {
+		t.Logf("Cache stats: unavailable")
+		return
+	}
+	assert.NoError(t, err, "failed to get cache stats")
+
+	t.Logf("Cache stats:")
+	t.Logf("  Objects: %d", stats.Objects)
+	t.Logf("  Size: %d MB", stats.Size/(1024*1024))
+	t.Logf("  Capacity: %d MB", stats.Capacity/(1024*1024))
+
+	// Verify size is within capacity (allow some slack for in-flight writes)
 	if stats.Capacity > 0 {
 		assert.True(t, stats.Size <= stats.Capacity*2,
-			"cache size (%d) exceeds capacity x 2 (%d)", stats.Size, stats.Capacity)
+			"cache size (%d) exceeds capacity x 2 (%d)", stats.Size, stats.Capacity*2)
 	}
 
 	// Verify object count is non-negative

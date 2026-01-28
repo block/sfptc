@@ -172,6 +172,10 @@ func (c *Remote) Stats(ctx context.Context) (Stats, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotImplemented {
+		return Stats{}, ErrStatsUnavailable
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return Stats{}, errors.Errorf("unexpected status code: %d", resp.StatusCode)
 	}

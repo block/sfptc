@@ -290,16 +290,10 @@ func (s *S3) Delete(ctx context.Context, key Key) error {
 	return nil
 }
 
-func (s *S3) Stats(ctx context.Context) (Stats, error) {
-	var stats Stats
-	for obj := range s.client.ListObjects(ctx, s.config.Bucket, minio.ListObjectsOptions{Recursive: true}) {
-		if obj.Err != nil {
-			return Stats{}, errors.Errorf("failed to list objects: %w", obj.Err)
-		}
-		stats.Objects++
-		stats.Size += obj.Size
-	}
-	return stats, nil
+func (s *S3) Stats(_ context.Context) (Stats, error) {
+	// S3 doesn't provide efficient count/size operations without listing the entire bucket,
+	// which would be prohibitively slow and expensive.
+	return Stats{}, ErrStatsUnavailable
 }
 
 type s3Writer struct {

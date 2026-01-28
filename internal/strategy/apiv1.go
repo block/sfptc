@@ -150,6 +150,10 @@ func (d *APIV1) deleteObject(w http.ResponseWriter, r *http.Request) {
 func (d *APIV1) getStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := d.cache.Stats(r.Context())
 	if err != nil {
+		if errors.Is(err, cache.ErrStatsUnavailable) {
+			d.httpError(w, http.StatusNotImplemented, err, "Stats not available for this cache backend")
+			return
+		}
 		d.httpError(w, http.StatusInternalServerError, err, "Failed to get cache stats")
 		return
 	}
