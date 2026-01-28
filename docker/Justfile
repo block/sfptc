@@ -1,0 +1,35 @@
+set positional-arguments := true
+set shell := ["bash", "-c"]
+
+# Configuration
+ROOT := `git rev-parse --show-toplevel 2>/dev/null || echo "."` 
+TAG := `git rev-parse --short HEAD 2>/dev/null || echo "dev"`
+DOCKERFILE := ROOT + "/docker/Dockerfile"
+
+# Build Docker image for local development
+build:
+    @just --justfile {{ ROOT }}/Justfile build-linux
+    @echo "Building Docker image..."
+    @docker build -f {{ DOCKERFILE }} -t cachew:local {{ ROOT }}
+    @echo "✓ Built cachew:local"
+
+# Build multi-arch Docker image (builds for amd64 + arm64, stays in cache)
+build-multi:
+    @just --justfile {{ ROOT }}/Justfile build-all
+    @docker buildx create --use --driver docker-container --driver-opt image=moby/buildkit:v0.17.3 --name multi-arch-cachew 2>/dev/null || docker buildx use multi-arch-cachew
+    @echo "Building multi-arch image..."
+    @docker buildx build --platform linux/amd64,linux/arm64 -f {{ DOCKERFILE }} -t cachew:{{ TAG }} {{ ROOT }}
+    @echo "✓ Built multi-arch image (in cache)"
+
+# Run in Docker (usage: just docker run [log_level])
+run log_level="info":
+    @just build
+    @echo "→ Starting cachew at http://localhost:8080 (log-level={{ log_level }})"
+    @docker run --rm -it -p 8080:8080 -v {{ ROOT }}/state:/app/state --name cachew cachew:local --log-level={{ log_level }}
+
+# Clean up Docker images
+clean:
+    @echo "Cleaning Docker images..."
+    @docker rmi cachew:local 2>/dev/null || true
+    @docker rmi cachew:{{ TAG }} 2>/dev/null || true
+    @echo "✓ Cleaned"

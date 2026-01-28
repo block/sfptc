@@ -11,36 +11,29 @@ just run                    # Build and run on localhost:8080
 
 **Run in Docker:**
 ```bash
-just docker-run             # Build and run in container
-just docker-run debug       # Run with debug logging
+just docker run             # Build and run in container
+just docker run debug       # Run with debug logging
 ```
 
 ## Building and Testing
 
 ```bash
 just build              # Build for current platform
-just build-linux        # Build for Linux (for Docker)
+just build-linux        # Build for Linux
 just build-all          # Build all platforms
 just test               # Run tests
 just lint               # Lint code
 just fmt                # Format code
 ```
 
-## Docker Images
-
-### Build Images
+## Docker
 
 ```bash
-just docker-build        # Single-arch local image (fast)
-just docker-build-multi  # Multi-arch image for ECR
-```
-
-### Push to ECR
-
-**Push from local machine:**
-```bash
-just image-push          # Push with commit SHA tag
-just image-push latest   # Push :latest and commit SHA tags
+just docker build           # Build single-arch Docker image for local use
+just docker build-multi     # Build multi-arch image (amd64 + arm64)
+just docker run             # Run in container
+just docker run debug       # Run with debug logging
+just docker clean           # Clean up Docker images
 ```
 
 ## Using the Cache
