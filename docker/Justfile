@@ -4,21 +4,31 @@ set shell := ["bash", "-c"]
 # Configuration
 ROOT := `git rev-parse --show-toplevel 2>/dev/null || echo "."` 
 TAG := `git rev-parse --short HEAD 2>/dev/null || echo "dev"`
+VERSION := `git describe --tags --always --dirty 2>/dev/null || echo "dev"`
+GIT_COMMIT := `git rev-parse HEAD 2>/dev/null || echo "unknown"`
 DOCKERFILE := ROOT + "/docker/Dockerfile"
 
 # Build Docker image for local development
 build:
-    @just --justfile {{ ROOT }}/Justfile build-linux
     @echo "Building Docker image..."
-    @docker build -f {{ DOCKERFILE }} -t cachew:local {{ ROOT }}
+    @docker build -f {{ DOCKERFILE }} \
+        --build-arg VERSION={{ VERSION }} \
+        --build-arg GIT_COMMIT={{ GIT_COMMIT }} \
+        -t cachew:local \
+        {{ ROOT }}
     @echo "✓ Built cachew:local"
 
 # Build multi-arch Docker image (builds for amd64 + arm64, stays in cache)
 build-multi:
-    @just --justfile {{ ROOT }}/Justfile build-all
     @docker buildx create --use --driver docker-container --driver-opt image=moby/buildkit:v0.17.3 --name multi-arch-cachew 2>/dev/null || docker buildx use multi-arch-cachew
     @echo "Building multi-arch image..."
-    @docker buildx build --platform linux/amd64,linux/arm64 -f {{ DOCKERFILE }} -t cachew:{{ TAG }} {{ ROOT }}
+    @docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        -f {{ DOCKERFILE }} \
+        --build-arg VERSION={{ VERSION }} \
+        --build-arg GIT_COMMIT={{ GIT_COMMIT }} \
+        -t cachew:{{ TAG }} \
+        {{ ROOT }}
     @echo "✓ Built multi-arch image (in cache)"
 
 # Run in Docker (usage: just docker run [log_level])
