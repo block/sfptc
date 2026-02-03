@@ -30,3 +30,7 @@ disk {
 gomod {
   proxy = "https://proxy.golang.org"
 }
+
+hermit {
+  base-url = "${CACHEW_URL}"
+}
