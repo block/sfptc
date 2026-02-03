@@ -15,6 +15,27 @@ import (
 	"github.com/alecthomas/errors"
 )
 
+var (
+	sharedManager   *Manager
+	sharedManagerMu sync.RWMutex
+)
+
+// SetShared stores a Manager instance to be shared across strategies.
+// This should be called by the git strategy after creating its Manager.
+func SetShared(m *Manager) {
+	sharedManagerMu.Lock()
+	defer sharedManagerMu.Unlock()
+	sharedManager = m
+}
+
+// GetShared retrieves the shared Manager instance if one exists.
+// Returns nil if no shared Manager has been set.
+func GetShared() *Manager {
+	sharedManagerMu.RLock()
+	defer sharedManagerMu.RUnlock()
+	return sharedManager
+}
+
 type State int
 
 const (
@@ -428,4 +449,17 @@ func (r *Repository) GetUpstreamRefs(ctx context.Context) (map[string]string, er
 	}
 
 	return ParseGitRefs(output), nil
+}
+
+// HasCommit checks if a specific commit/ref exists in the repository.
+// Uses git cat-file -e to efficiently check object existence.
+// Thread-safe - acquires read lock.
+func (r *Repository) HasCommit(ctx context.Context, ref string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// #nosec G204 - r.path and ref are controlled by us
+	cmd := exec.CommandContext(ctx, "git", "-C", r.path, "cat-file", "-e", ref)
+	err := cmd.Run()
+	return err == nil
 }

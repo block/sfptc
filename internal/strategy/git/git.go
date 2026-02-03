@@ -68,6 +68,9 @@ func New(ctx context.Context, config Config, scheduler jobscheduler.Scheduler, c
 		return nil, errors.Wrap(err, "create clone manager")
 	}
 
+	// Register as shared Manager for use by other strategies (e.g., gomod)
+	gitclone.SetShared(cloneManager)
+
 	s := &Strategy{
 		config:       config,
 		cache:        cache,

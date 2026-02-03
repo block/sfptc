@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/alecthomas/errors"
 	"github.com/goproxy/goproxy"
 
 	"github.com/block/cachew/internal/cache"
+	"github.com/block/cachew/internal/gitclone"
 	"github.com/block/cachew/internal/jobscheduler"
 	"github.com/block/cachew/internal/logging"
 	"github.com/block/cachew/internal/strategy"
@@ -20,15 +22,17 @@ func init() {
 }
 
 type Config struct {
-	Proxy string `hcl:"proxy,optional" help:"Upstream Go module proxy URL (defaults to proxy.golang.org)" default:"https://proxy.golang.org"`
+	Proxy        string   `hcl:"proxy,optional" help:"Upstream Go module proxy URL (defaults to proxy.golang.org)" default:"https://proxy.golang.org"`
+	PrivatePaths []string `hcl:"private-paths,optional" help:"Module path patterns for private repositories"`
 }
 
 type Strategy struct {
-	config  Config
-	cache   cache.Cache
-	logger  *slog.Logger
-	proxy   *url.URL
-	goproxy *goproxy.Goproxy
+	config       Config
+	cache        cache.Cache
+	logger       *slog.Logger
+	proxy        *url.URL
+	goproxy      *goproxy.Goproxy
+	cloneManager *gitclone.Manager
 }
 
 var _ strategy.Strategy = (*Strategy)(nil)
@@ -46,14 +50,34 @@ func New(ctx context.Context, config Config, _ jobscheduler.Scheduler, cache cac
 		proxy:  parsedURL,
 	}
 
-	s.goproxy = &goproxy.Goproxy{
-		Logger: s.logger,
-		Fetcher: &goproxy.GoFetcher{
-			Env: []string{
-				"GOPROXY=" + config.Proxy,
-				"GOSUMDB=off", // Disable checksum database validation in fetcher, to prevent unneccessary double validation
-			},
+	publicFetcher := &goproxy.GoFetcher{
+		Env: []string{
+			"GOPROXY=" + config.Proxy,
+			"GOSUMDB=off", // Disable checksum database validation in fetcher, to prevent unneccessary double validation
 		},
+	}
+
+	var fetcher goproxy.Fetcher = publicFetcher
+
+	// Configure private repository support if private-paths is specified
+	if len(config.PrivatePaths) > 0 {
+		// Get shared Manager from git strategy
+		cloneManager := gitclone.GetShared()
+		if cloneManager == nil {
+			return nil, errors.New("private-paths configured but git strategy not initialized - git strategy with mirror-root is required for private module support")
+		}
+
+		s.cloneManager = cloneManager
+		privateFetcher := newPrivateFetcher(s, cloneManager)
+		fetcher = newCompositeFetcher(publicFetcher, privateFetcher, config.PrivatePaths)
+
+		s.logger.InfoContext(ctx, "Configured private module support",
+			slog.Any("private_paths", config.PrivatePaths))
+	}
+
+	s.goproxy = &goproxy.Goproxy{
+		Logger:  s.logger,
+		Fetcher: fetcher,
 		Cacher: &goproxyCacher{
 			cache: cache,
 		},
