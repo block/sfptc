@@ -21,6 +21,21 @@ import (
 // since they modify the global http.DefaultTransport
 var httpTransportMutexHermit sync.Mutex
 
+func setupHermitTest(t *testing.T) (*http.ServeMux, context.Context, cache.Cache) {
+	t.Helper()
+
+	_, ctx := logging.Configure(context.Background(), logging.Config{Level: slog.LevelError})
+	memCache, err := cache.NewMemory(ctx, cache.MemoryConfig{MaxTTL: time.Hour})
+	assert.NoError(t, err)
+	t.Cleanup(func() { memCache.Close() })
+
+	mux := http.NewServeMux()
+	_, err = strategy.NewHermit(ctx, strategy.HermitConfig{BaseURL: "http://localhost:8080"}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
+	assert.NoError(t, err)
+
+	return mux, ctx, memCache
+}
+
 func TestHermitNonGitHubCaching(t *testing.T) {
 	httpTransportMutexHermit.Lock()
 	defer httpTransportMutexHermit.Unlock()
@@ -37,14 +52,7 @@ func TestHermitNonGitHubCaching(t *testing.T) {
 	defer func() { http.DefaultTransport = originalTransport }()                                   //nolint:reassign
 	http.DefaultTransport = &mockTransport{backend: backend, originalTransport: originalTransport} //nolint:reassign
 
-	_, ctx := logging.Configure(context.Background(), logging.Config{Level: slog.LevelError})
-	memCache, err := cache.NewMemory(ctx, cache.MemoryConfig{MaxTTL: time.Hour})
-	assert.NoError(t, err)
-	defer memCache.Close()
-
-	mux := http.NewServeMux()
-	_, err = strategy.NewHermit(ctx, strategy.HermitConfig{}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
-	assert.NoError(t, err)
+	mux, ctx, _ := setupHermitTest(t)
 
 	req1 := httptest.NewRequestWithContext(ctx, http.MethodGet, "/hermit/golang.org/dl/go1.21.0.tar.gz", nil)
 	w1 := httptest.NewRecorder()
@@ -85,16 +93,9 @@ func TestHermitGitHubRelease(t *testing.T) {
 	}))
 	defer githubServer.Close()
 
-	_, ctx := logging.Configure(context.Background(), logging.Config{Level: slog.LevelError})
-	memCache, err := cache.NewMemory(ctx, cache.MemoryConfig{MaxTTL: time.Hour})
-	assert.NoError(t, err)
-	defer memCache.Close()
+	mux, ctx, memCache := setupHermitTest(t)
 
-	mux := http.NewServeMux()
-	_, err = strategy.NewHermit(ctx, strategy.HermitConfig{}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
-	assert.NoError(t, err)
-
-	_, err = strategy.NewGitHubReleases(ctx, strategy.GitHubReleasesConfig{}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
+	_, err := strategy.NewGitHubReleases(ctx, strategy.GitHubReleasesConfig{}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
 	assert.NoError(t, err)
 
 	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/hermit/github.com/alecthomas/chroma/releases/download/v2.14.0/chroma-2.14.0-linux-amd64.tar.gz", nil)
@@ -119,14 +120,7 @@ func TestHermitNonOKStatus(t *testing.T) {
 	defer func() { http.DefaultTransport = originalTransport }()                                   //nolint:reassign
 	http.DefaultTransport = &mockTransport{backend: backend, originalTransport: originalTransport} //nolint:reassign
 
-	_, ctx := logging.Configure(context.Background(), logging.Config{Level: slog.LevelError})
-	memCache, err := cache.NewMemory(ctx, cache.MemoryConfig{MaxTTL: time.Hour})
-	assert.NoError(t, err)
-	defer memCache.Close()
-
-	mux := http.NewServeMux()
-	_, err = strategy.NewHermit(ctx, strategy.HermitConfig{}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
-	assert.NoError(t, err)
+	mux, ctx, memCache := setupHermitTest(t)
 
 	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/hermit/example.com/missing.tar.gz", nil)
 	w := httptest.NewRecorder()
@@ -136,7 +130,7 @@ func TestHermitNonOKStatus(t *testing.T) {
 	assert.Equal(t, "not found", w.Body.String())
 
 	key := cache.NewKey("https://example.com/missing.tar.gz")
-	_, _, err = memCache.Open(context.Background(), key)
+	_, _, err := memCache.Open(context.Background(), key)
 	assert.Error(t, err, "non-OK responses should not be cached")
 }
 
@@ -178,14 +172,7 @@ func TestHermitDifferentSources(t *testing.T) {
 			defer func() { http.DefaultTransport = originalTransport }()                                   //nolint:reassign
 			http.DefaultTransport = &mockTransport{backend: backend, originalTransport: originalTransport} //nolint:reassign
 
-			_, ctx := logging.Configure(context.Background(), logging.Config{Level: slog.LevelError})
-			memCache, err := cache.NewMemory(ctx, cache.MemoryConfig{MaxTTL: time.Hour})
-			assert.NoError(t, err)
-			defer memCache.Close()
-
-			mux := http.NewServeMux()
-			_, err = strategy.NewHermit(ctx, strategy.HermitConfig{}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
-			assert.NoError(t, err)
+			mux, ctx, _ := setupHermitTest(t)
 
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, tt.path, nil)
 			w := httptest.NewRecorder()
@@ -204,7 +191,7 @@ func TestHermitString(t *testing.T) {
 	defer memCache.Close()
 
 	mux := http.NewServeMux()
-	hermit, err := strategy.NewHermit(ctx, strategy.HermitConfig{}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
+	hermit, err := strategy.NewHermit(ctx, strategy.HermitConfig{BaseURL: "http://localhost:8080"}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
 	assert.NoError(t, err)
 
 	assert.Equal(t, "hermit", hermit.String())
@@ -235,14 +222,7 @@ func TestHermitCacheKeyGeneration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, ctx := logging.Configure(context.Background(), logging.Config{Level: slog.LevelError})
-			memCache, err := cache.NewMemory(ctx, cache.MemoryConfig{MaxTTL: time.Hour})
-			assert.NoError(t, err)
-			defer memCache.Close()
-
-			mux := http.NewServeMux()
-			_, err = strategy.NewHermit(ctx, strategy.HermitConfig{}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
-			assert.NoError(t, err)
+			mux, ctx, _ := setupHermitTest(t)
 
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, tt.path, nil)
 			w := httptest.NewRecorder()

@@ -19,12 +19,15 @@ func init() {
 	Register("hermit", "Caches Hermit package downloads.", NewHermit)
 }
 
-type HermitConfig struct{}
+type HermitConfig struct {
+	BaseURL string `hcl:"base-url" help:"Base URL for internal redirects to github-releases strategy (e.g., http://localhost:8080)."`
+}
 
 // Hermit caches Hermit package downloads.
 // Acts as a smart router: GitHub releases redirect to github-releases strategy,
 // all other sources are handled directly.
 type Hermit struct {
+	config HermitConfig
 	cache  cache.Cache
 	client *http.Client
 	logger *slog.Logger
@@ -33,10 +36,11 @@ type Hermit struct {
 
 var _ Strategy = (*Hermit)(nil)
 
-func NewHermit(ctx context.Context, _ HermitConfig, _ jobscheduler.Scheduler, cache cache.Cache, mux Mux) (*Hermit, error) {
+func NewHermit(ctx context.Context, config HermitConfig, _ jobscheduler.Scheduler, cache cache.Cache, mux Mux) (*Hermit, error) {
 	logger := logging.FromContext(ctx)
 
 	s := &Hermit{
+		config: config,
 		cache:  cache,
 		client: http.DefaultClient,
 		logger: logger,
@@ -45,7 +49,8 @@ func NewHermit(ctx context.Context, _ HermitConfig, _ jobscheduler.Scheduler, ca
 
 	mux.Handle("GET /hermit/{host}/{path...}", http.HandlerFunc(s.handleRequest))
 
-	logger.InfoContext(ctx, "Hermit strategy initialized")
+	logger.InfoContext(ctx, "Hermit strategy initialized",
+		slog.String("base_url", config.BaseURL))
 
 	return s, nil
 }
@@ -75,18 +80,12 @@ func (s *Hermit) redirectToGitHubReleases(w http.ResponseWriter, r *http.Request
 
 	h := handler.New(s.client, cache.NoOpCache()).
 		Transform(func(r *http.Request) (*http.Request, error) {
-			internalURL := &url.URL{
-				Scheme:   "http",
-				Host:     r.Host,
-				Path:     newPath,
-				RawQuery: r.URL.RawQuery,
+			internalURL := s.config.BaseURL + newPath
+			if r.URL.RawQuery != "" {
+				internalURL += "?" + r.URL.RawQuery
 			}
 
-			if r.TLS != nil {
-				internalURL.Scheme = "https"
-			}
-
-			req, err := http.NewRequestWithContext(r.Context(), r.Method, internalURL.String(), nil)
+			req, err := http.NewRequestWithContext(r.Context(), r.Method, internalURL, nil)
 			if err != nil {
 				return nil, errors.Wrap(err, "create internal redirect request")
 			}
