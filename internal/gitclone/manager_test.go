@@ -221,20 +221,16 @@ func TestRepository_HasCommit(t *testing.T) {
 	tmpDir := t.TempDir()
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
-	// Create a real git repo with a commit
 	assert.NoError(t, os.MkdirAll(repoPath, 0o755))
 
-	// Initialize git repo
 	cmd := exec.Command("git", "-C", repoPath, "init")
 	assert.NoError(t, cmd.Run())
 
-	// Configure git user
 	cmd = exec.Command("git", "-C", repoPath, "config", "user.email", "test@example.com")
 	assert.NoError(t, cmd.Run())
 	cmd = exec.Command("git", "-C", repoPath, "config", "user.name", "Test User")
 	assert.NoError(t, cmd.Run())
 
-	// Create a file and commit
 	testFile := filepath.Join(repoPath, "test.txt")
 	assert.NoError(t, os.WriteFile(testFile, []byte("test content"), 0o644))
 	cmd = exec.Command("git", "-C", repoPath, "add", "test.txt")
@@ -242,11 +238,9 @@ func TestRepository_HasCommit(t *testing.T) {
 	cmd = exec.Command("git", "-C", repoPath, "commit", "-m", "Initial commit")
 	assert.NoError(t, cmd.Run())
 
-	// Create a tag
 	cmd = exec.Command("git", "-C", repoPath, "tag", "v1.0.0")
 	assert.NoError(t, cmd.Run())
 
-	// Create Repository instance
 	repo := &Repository{
 		state:       StateReady,
 		path:        repoPath,
@@ -255,11 +249,9 @@ func TestRepository_HasCommit(t *testing.T) {
 	}
 	repo.fetchSem <- struct{}{}
 
-	// Test HasCommit with existing ref
 	assert.True(t, repo.HasCommit(ctx, "HEAD"))
 	assert.True(t, repo.HasCommit(ctx, "v1.0.0"))
 
-	// Test HasCommit with non-existent ref
 	assert.False(t, repo.HasCommit(ctx, "nonexistent"))
 	assert.False(t, repo.HasCommit(ctx, "v9.9.9"))
 }
