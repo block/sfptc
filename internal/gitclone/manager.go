@@ -451,9 +451,6 @@ func (r *Repository) GetUpstreamRefs(ctx context.Context) (map[string]string, er
 	return ParseGitRefs(output), nil
 }
 
-// HasCommit checks if a specific commit/ref exists in the repository.
-// Uses git cat-file -e to efficiently check object existence.
-// Thread-safe - acquires read lock.
 func (r *Repository) HasCommit(ctx context.Context, ref string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

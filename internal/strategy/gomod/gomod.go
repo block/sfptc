@@ -59,9 +59,7 @@ func New(ctx context.Context, config Config, _ jobscheduler.Scheduler, cache cac
 
 	var fetcher goproxy.Fetcher = publicFetcher
 
-	// Configure private repository support if private-paths is specified
 	if len(config.PrivatePaths) > 0 {
-		// Get shared Manager from git strategy
 		cloneManager := gitclone.GetShared()
 		if cloneManager == nil {
 			return nil, errors.New("private-paths configured but git strategy not initialized - git strategy with mirror-root is required for private module support")

@@ -41,7 +41,6 @@ func (p *privateFetcher) Query(ctx context.Context, path, query string) (version
 		return "", time.Time{}, errors.Wrapf(err, "get or create clone for %s", path)
 	}
 
-	// Verify repository is ready
 	if repo.State() != gitclone.StateReady {
 		return "", time.Time{}, errors.Errorf("repository %s not cloned yet", gitURL)
 	}
@@ -64,7 +63,6 @@ func (p *privateFetcher) List(ctx context.Context, path string) (versions []stri
 		return nil, errors.Wrapf(err, "get or create clone for %s", path)
 	}
 
-	// Verify repository is ready
 	if repo.State() != gitclone.StateReady {
 		return nil, errors.Errorf("repository %s not cloned yet", gitURL)
 	}
@@ -87,12 +85,10 @@ func (p *privateFetcher) Download(ctx context.Context, path, version string) (in
 		return nil, nil, nil, errors.Wrapf(err, "get or create clone for %s", path)
 	}
 
-	// Verify repository is ready
 	if repo.State() != gitclone.StateReady {
 		return nil, nil, nil, errors.Errorf("repository %s not cloned yet", gitURL)
 	}
 
-	// Verify the specific version/commit exists
 	if err := p.verifyCommitExists(ctx, repo, version); err != nil {
 		return nil, nil, nil, err
 	}
@@ -118,9 +114,6 @@ func (p *privateFetcher) modulePathToGitURL(modulePath string) string {
 	return "https://" + modulePath
 }
 
-// verifyCommitExists checks if a specific commit exists in the repo.
-// Uses HasCommit which acquires a read lock and runs git cat-file -e.
-// Returns an error if commit doesn't exist.
 func (p *privateFetcher) verifyCommitExists(ctx context.Context, repo *gitclone.Repository, ref string) error {
 	if !repo.HasCommit(ctx, ref) {
 		return errors.Errorf("commit %s not found in repository %s", ref, repo.UpstreamURL())
@@ -128,7 +121,6 @@ func (p *privateFetcher) verifyCommitExists(ctx context.Context, repo *gitclone.
 	return nil
 }
 
-// resolveVersionQuery resolves a version query (like "latest" or "v1.2.3") to a specific version.
 func (p *privateFetcher) resolveVersionQuery(ctx context.Context, repo *gitclone.Repository, query string) (string, time.Time, error) {
 	if query == "latest" {
 		versions, err := p.listVersions(ctx, repo)
