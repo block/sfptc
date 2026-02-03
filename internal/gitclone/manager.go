@@ -259,7 +259,7 @@ func (r *Repository) Clone(ctx context.Context, config Config) error {
 	return nil
 }
 
-// gitConfigArgs returns the git config arguments for http tuning settings
+// gitConfigArgs returns the git config arguments for http tuning settings.
 func gitConfigArgs(config GitTuningConfig) []string {
 	return []string{
 		"-c", "http.postBuffer=" + strconv.Itoa(config.PostBuffer),
@@ -434,7 +434,7 @@ func (r *Repository) GetUpstreamRefs(ctx context.Context) (map[string]string, er
 	return ParseGitRefs(output), nil
 }
 
-// CommitError represents an error related to commit resolution
+// CommitError represents an error related to commit resolution.
 type CommitError struct {
 	SHA        string
 	NotFound   bool  // doesn't exist anywhere (locally or upstream)
@@ -459,7 +459,7 @@ func (e *CommitError) Unwrap() error {
 	return e.Err
 }
 
-// HasCommit checks if a commit exists in the local repository
+// HasCommit checks if a commit exists in the local repository.
 func (r *Repository) HasCommit(ctx context.Context, sha string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -472,7 +472,8 @@ func (r *Repository) HasCommit(ctx context.Context, sha string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", r.path, "cat-file", "-e", sha)
 	err := cmd.Run()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return false, nil
 		}
 		return false, errors.Wrap(err, "git cat-file")
@@ -481,7 +482,7 @@ func (r *Repository) HasCommit(ctx context.Context, sha string) (bool, error) {
 	return true, nil
 }
 
-// CommitExistsUpstream checks if a commit exists in the upstream repository
+// CommitExistsUpstream checks if a commit exists in the upstream repository.
 func (r *Repository) CommitExistsUpstream(ctx context.Context, sha string) (bool, error) {
 	// Use git ls-remote to check if the commit exists upstream
 	// #nosec G204 - r.upstreamURL is controlled by us
@@ -501,7 +502,7 @@ func (r *Repository) CommitExistsUpstream(ctx context.Context, sha string) (bool
 	return len(strings.TrimSpace(string(output))) > 0, nil
 }
 
-// FetchCommit fetches a specific commit from upstream
+// FetchCommit fetches a specific commit from upstream.
 func (r *Repository) FetchCommit(ctx context.Context, sha string, config Config) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -563,7 +564,7 @@ func (r *Repository) FetchCommit(ctx context.Context, sha string, config Config)
 	return nil
 }
 
-// ResolveCommit ensures a commit is available locally, fetching it if necessary
+// ResolveCommit ensures a commit is available locally, fetching it if necessary.
 func (r *Repository) ResolveCommit(ctx context.Context, sha string, config Config) error {
 	// First check if we have it locally
 	hasCommit, err := r.HasCommit(ctx, sha)
@@ -593,7 +594,7 @@ func (r *Repository) ResolveCommit(ctx context.Context, sha string, config Confi
 	return nil
 }
 
-// FetchRef fetches a specific ref from upstream
+// FetchRef fetches a specific ref from upstream.
 func (r *Repository) FetchRef(ctx context.Context, ref string, config Config) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -619,7 +620,7 @@ func (r *Repository) FetchRef(ctx context.Context, ref string, config Config) er
 	return nil
 }
 
-// Unshallow converts a shallow clone to a full clone
+// Unshallow converts a shallow clone to a full clone.
 func (r *Repository) Unshallow(ctx context.Context, config Config) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
