@@ -19,6 +19,7 @@ import (
 
 	"github.com/block/cachew/internal/cache"
 	"github.com/block/cachew/internal/config"
+	"github.com/block/cachew/internal/githubapp"
 	"github.com/block/cachew/internal/httputil"
 	"github.com/block/cachew/internal/jobscheduler"
 	"github.com/block/cachew/internal/logging"
@@ -34,6 +35,7 @@ type GlobalConfig struct {
 	SchedulerConfig jobscheduler.Config `embed:"" hcl:"scheduler,block" prefix:"scheduler-"`
 	LoggingConfig   logging.Config      `embed:"" hcl:"log,block" prefix:"log-"`
 	MetricsConfig   metrics.Config      `embed:"" hcl:"metrics,block" prefix:"metrics-"`
+	GithubAppConfig githubapp.Config    `embed:"" hcl:"github-app,block" prefix:"github-app-"`
 }
 
 var cli struct {
@@ -61,6 +63,8 @@ func main() {
 	logger, ctx := logging.Configure(ctx, cli.LoggingConfig)
 
 	scheduler := jobscheduler.New(ctx, cli.SchedulerConfig)
+
+	githubapp.SetShared(initializeGitHubApp(ctx, logger, cli.GithubAppConfig))
 
 	cr, sr := newRegistries(scheduler)
 
@@ -127,6 +131,32 @@ func printSchema(kctx *kong.Context, cr *cache.Registry, sr *strategy.Registry) 
 	}
 }
 
+func initializeGitHubApp(ctx context.Context, logger *slog.Logger, cfg githubapp.Config) *githubapp.TokenManager {
+	if err := cfg.Initialize(logger); err != nil {
+		logger.WarnContext(ctx, "Failed to initialize GitHub App config",
+			slog.String("error", err.Error()))
+		return nil
+	}
+
+	if !cfg.IsConfigured() {
+		return nil
+	}
+
+	tm, err := githubapp.NewTokenManager(cfg, githubapp.DefaultTokenCacheConfig())
+	if err != nil {
+		logger.ErrorContext(ctx, "Failed to create GitHub App token manager",
+			slog.String("error", err.Error()))
+		return nil
+	}
+
+	logger.InfoContext(ctx, "Global GitHub App authentication enabled",
+		slog.String("app_id", cfg.AppID),
+		slog.String("private_key_path", cfg.PrivateKeyPath),
+		slog.Int("installations", len(cfg.Installations)))
+
+	return tm
+}
+
 func newMux(ctx context.Context, cr *cache.Registry, sr *strategy.Registry, providersConfig *hcl.AST) (*http.ServeMux, error) {
 	mux := http.NewServeMux()
 
@@ -140,7 +170,7 @@ func newMux(ctx context.Context, cr *cache.Registry, sr *strategy.Registry, prov
 		_, _ = w.Write([]byte("OK")) //nolint:errcheck
 	})
 
-	if err := config.Load(ctx, cr, sr, providersConfig, mux, parseEnvars()); err != nil {
+	if err := config.Load(ctx, cr, sr, providersConfig, mux, config.ParseEnvars()); err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
@@ -170,14 +200,4 @@ func newServer(ctx context.Context, logger *slog.Logger, mux *http.ServeMux) *ht
 			return logging.ContextWithLogger(ctx, logger.With("client", c.RemoteAddr().String()))
 		},
 	}
-}
-
-func parseEnvars() map[string]string {
-	envars := map[string]string{}
-	for _, env := range os.Environ() {
-		if key, value, ok := strings.Cut(env, "="); ok {
-			envars[key] = value
-		}
-	}
-	return envars
 }

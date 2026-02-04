@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/alecthomas/hcl/v2"
@@ -14,7 +15,22 @@ func KongLoader[GlobalConfig any](r io.Reader) (kong.Resolver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HCL: %w", err)
 	}
+
+	// Expand environment variables in the AST
+	expandVars(ast, ParseEnvars())
+
 	return &kongResolver{flattenHCL(ast)}, nil
+}
+
+// ParseEnvars returns a map of all environment variables.
+func ParseEnvars() map[string]string {
+	envars := map[string]string{}
+	for _, env := range os.Environ() {
+		if key, value, ok := strings.Cut(env, "="); ok {
+			envars[key] = value
+		}
+	}
+	return envars
 }
 
 type kongResolver struct {

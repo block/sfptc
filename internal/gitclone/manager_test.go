@@ -21,7 +21,7 @@ func TestNewManager(t *testing.T) {
 		GitConfig:        DefaultGitTuningConfig(),
 	}
 
-	manager, err := NewManager(context.Background(), config)
+	manager, err := NewManager(context.Background(), config, nil)
 	assert.NoError(t, err)
 	assert.NotZero(t, manager)
 	assert.Equal(t, tmpDir, manager.config.RootDir)
@@ -33,7 +33,7 @@ func TestNewManager_RequiresRootDir(t *testing.T) {
 		RefCheckInterval: 10 * time.Second,
 	}
 
-	_, err := NewManager(context.Background(), config)
+	_, err := NewManager(context.Background(), config, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "RootDir is required")
 }
@@ -47,7 +47,7 @@ func TestManager_GetOrCreate(t *testing.T) {
 		GitConfig:        DefaultGitTuningConfig(),
 	}
 
-	manager, err := NewManager(context.Background(), config)
+	manager, err := NewManager(context.Background(), config, nil)
 	assert.NoError(t, err)
 
 	upstreamURL := "https://github.com/user/repo"
@@ -73,7 +73,7 @@ func TestManager_GetOrCreate_ExistingClone(t *testing.T) {
 		GitConfig:        DefaultGitTuningConfig(),
 	}
 
-	manager, err := NewManager(context.Background(), config)
+	manager, err := NewManager(context.Background(), config, nil)
 	assert.NoError(t, err)
 
 	repoPath := filepath.Join(tmpDir, "github.com", "user", "repo")
@@ -98,7 +98,7 @@ func TestManager_Get(t *testing.T) {
 		GitConfig:        DefaultGitTuningConfig(),
 	}
 
-	manager, err := NewManager(context.Background(), config)
+	manager, err := NewManager(context.Background(), config, nil)
 	assert.NoError(t, err)
 
 	upstreamURL := "https://github.com/user/repo"
@@ -123,7 +123,7 @@ func TestManager_DiscoverExisting(t *testing.T) {
 		GitConfig:        DefaultGitTuningConfig(),
 	}
 
-	manager, err := NewManager(context.Background(), config)
+	manager, err := NewManager(context.Background(), config, nil)
 	assert.NoError(t, err)
 
 	repos := []string{

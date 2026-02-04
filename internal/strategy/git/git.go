@@ -21,6 +21,7 @@ import (
 
 	"github.com/block/cachew/internal/cache"
 	"github.com/block/cachew/internal/gitclone"
+	"github.com/block/cachew/internal/githubapp"
 	"github.com/block/cachew/internal/jobscheduler"
 	"github.com/block/cachew/internal/logging"
 	"github.com/block/cachew/internal/strategy"
@@ -38,6 +39,7 @@ type Config struct {
 	RefCheckInterval time.Duration `hcl:"ref-check-interval,optional" help:"How long to cache ref checks." default:"10s"`
 	BundleInterval   time.Duration `hcl:"bundle-interval,optional" help:"How often to generate bundles. 0 disables bundling." default:"0"`
 	SnapshotInterval time.Duration `hcl:"snapshot-interval,optional" help:"How often to generate tar.zstd snapshots. 0 disables snapshots." default:"0"`
+	CloneDepth       int           `hcl:"clone-depth,optional" help:"Depth for shallow clones. 0 means full clone." default:"0"`
 }
 
 type Strategy struct {
@@ -50,6 +52,7 @@ type Strategy struct {
 	scheduler    jobscheduler.Scheduler
 	spoolsMu     sync.Mutex
 	spools       map[string]*RepoSpools
+	tokenManager *githubapp.TokenManager
 }
 
 func New(ctx context.Context, config Config, scheduler jobscheduler.Scheduler, cache cache.Cache, mux strategy.Mux) (*Strategy, error) {
@@ -67,12 +70,20 @@ func New(ctx context.Context, config Config, scheduler jobscheduler.Scheduler, c
 		config.RefCheckInterval = 10 * time.Second
 	}
 
+	// Use shared GitHub App token manager if configured
+	tokenManager := githubapp.GetShared()
+	if tokenManager != nil {
+		logger.InfoContext(ctx, "Using global GitHub App authentication for git strategy")
+	} else {
+		logger.WarnContext(ctx, "GitHub App not configured, using system git credentials")
+	}
+
 	cloneManager, err := gitclone.NewManager(ctx, gitclone.Config{
 		RootDir:          config.MirrorRoot,
 		FetchInterval:    config.FetchInterval,
 		RefCheckInterval: config.RefCheckInterval,
 		GitConfig:        gitclone.DefaultGitTuningConfig(),
-	})
+	}, tokenManager)
 	if err != nil {
 		return nil, errors.Wrap(err, "create clone manager")
 	}
@@ -91,6 +102,7 @@ func New(ctx context.Context, config Config, scheduler jobscheduler.Scheduler, c
 		ctx:          ctx,
 		scheduler:    scheduler.WithQueuePrefix("git"),
 		spools:       make(map[string]*RepoSpools),
+		tokenManager: tokenManager,
 	}
 
 	existing, err := s.cloneManager.DiscoverExisting(ctx)
@@ -113,6 +125,22 @@ func New(ctx context.Context, config Config, scheduler jobscheduler.Scheduler, c
 			req.URL.Host = req.PathValue("host")
 			req.URL.Path = "/" + req.PathValue("path")
 			req.Host = req.URL.Host
+
+			// Inject GitHub App authentication for github.com requests
+			if s.tokenManager != nil && req.URL.Host == "github.com" {
+				// Extract org from path (e.g., /squareup/blox.git/...)
+				parts := strings.Split(strings.TrimPrefix(req.URL.Path, "/"), "/")
+				if len(parts) >= 1 && parts[0] != "" {
+					org := parts[0]
+					token, err := s.tokenManager.GetTokenForOrg(req.Context(), org)
+					if err == nil && token != "" {
+						// Inject token as Basic auth with "x-access-token" username
+						req.SetBasicAuth("x-access-token", token)
+						logger.DebugContext(req.Context(), "Injecting GitHub App auth into upstream request",
+							slog.String("org", org))
+					}
+				}
+			}
 		},
 		Transport: s.httpClient.Transport,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
