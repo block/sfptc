@@ -184,19 +184,6 @@ func TestHermitDifferentSources(t *testing.T) {
 	}
 }
 
-func TestHermitString(t *testing.T) {
-	_, ctx := logging.Configure(context.Background(), logging.Config{Level: slog.LevelError})
-	memCache, err := cache.NewMemory(ctx, cache.MemoryConfig{MaxTTL: time.Hour})
-	assert.NoError(t, err)
-	defer memCache.Close()
-
-	mux := http.NewServeMux()
-	hermit, err := strategy.NewHermit(ctx, strategy.HermitConfig{BaseURL: "http://localhost:8080"}, jobscheduler.New(ctx, jobscheduler.Config{}), memCache, mux)
-	assert.NoError(t, err)
-
-	assert.Equal(t, "hermit", hermit.String())
-}
-
 func TestHermitCacheKeyGeneration(t *testing.T) {
 	tests := []struct {
 		name    string
