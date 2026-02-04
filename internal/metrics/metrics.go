@@ -171,13 +171,6 @@ func (c *Client) ServeMetrics(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", c.Handler())
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte("OK")); err != nil {
-			logger.ErrorContext(ctx, "failed to write health check response", "error", err)
-		}
-	})
-
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", c.port),
 		Handler:           mux,
