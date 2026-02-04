@@ -21,7 +21,7 @@ func init() {
 }
 
 type HermitConfig struct {
-	GitHubBaseURL string `hcl:"github-base-url,optional" help:"Base URL for GitHub release redirects" default:"${CACHEW_URL}/github.com"`
+	GitHubBaseURL string `hcl:"github-base-url" help:"Base URL for GitHub release redirects" default:"${CACHEW_URL}/github.com"`
 }
 
 // Hermit caches Hermit package downloads.
