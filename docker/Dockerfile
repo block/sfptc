@@ -16,9 +16,6 @@ WORKDIR /app
 # Copy pre-built binary from host (built by Justfile)
 COPY dist/cachewd-linux-${TARGETARCH} /usr/local/bin/cachewd
 
-# Copy default configuration file
-COPY cachew.hcl /app/cachew.hcl
-
 # Create state directory with proper permissions
 RUN mkdir -p /app/state/cache && \
   chown -R cachew:cachew /app
@@ -28,6 +25,6 @@ USER cachew
 
 # Bind to all interfaces in Docker (can be overridden with CACHEW_BIND env var)
 ENV CACHEW_BIND=0.0.0.0:8080
+ENV CACHEW_CONFIG=/app/config/cachew.hcl
 
 ENTRYPOINT ["/usr/local/bin/cachewd"]
-CMD ["--config", "/app/cachew.hcl"]

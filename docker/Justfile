@@ -41,7 +41,7 @@ build-multi:
 run log_level="info":
     @just build
     @echo "→ Starting cachew at http://localhost:8080 (log-level={{ log_level }})"
-    @docker run --rm -it -p 8080:8080 -v {{ ROOT }}/state:/app/state --name cachew cachew:local --log-level={{ log_level }}
+    @docker run --rm -p 8080:8080 -v {{ ROOT }}/state:/app/state -v {{ ROOT }}/cachew.hcl:/app/config/cachew.hcl --name cachew cachew:local --log-level={{ log_level }}
 
 # Clean up Docker images
 clean:
