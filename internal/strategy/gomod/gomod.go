@@ -11,11 +11,7 @@ import (
 	"github.com/goproxy/goproxy"
 
 	"github.com/block/cachew/internal/cache"
-<<<<<<< johnm/gomod-private-attempt-three
 	"github.com/block/cachew/internal/gitclone"
-	"github.com/block/cachew/internal/jobscheduler"
-=======
->>>>>>> main
 	"github.com/block/cachew/internal/logging"
 	"github.com/block/cachew/internal/strategy"
 )
