@@ -70,6 +70,8 @@ func New(ctx context.Context, config Config, scheduler jobscheduler.Scheduler, c
 		return nil, errors.Wrap(err, "create clone manager")
 	}
 
+	gitclone.SetShared(cloneManager)
+
 	s := &Strategy{
 		config:       config,
 		cache:        cache,

@@ -3,6 +3,7 @@ package gitclone //nolint:testpackage // white-box testing required for unexport
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -213,4 +214,44 @@ func TestState_String(t *testing.T) {
 	assert.Equal(t, "empty", StateEmpty.String())
 	assert.Equal(t, "cloning", StateCloning.String())
 	assert.Equal(t, "ready", StateReady.String())
+}
+
+func TestRepository_HasCommit(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	repoPath := filepath.Join(tmpDir, "test-repo")
+
+	assert.NoError(t, os.MkdirAll(repoPath, 0o755))
+
+	cmd := exec.Command("git", "-C", repoPath, "init")
+	assert.NoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "-C", repoPath, "config", "user.email", "test@example.com")
+	assert.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "-C", repoPath, "config", "user.name", "Test User")
+	assert.NoError(t, cmd.Run())
+
+	testFile := filepath.Join(repoPath, "test.txt")
+	assert.NoError(t, os.WriteFile(testFile, []byte("test content"), 0o644))
+	cmd = exec.Command("git", "-C", repoPath, "add", "test.txt")
+	assert.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "-C", repoPath, "commit", "-m", "Initial commit")
+	assert.NoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "-C", repoPath, "tag", "v1.0.0")
+	assert.NoError(t, cmd.Run())
+
+	repo := &Repository{
+		state:       StateReady,
+		path:        repoPath,
+		upstreamURL: "https://example.com/test-repo",
+		fetchSem:    make(chan struct{}, 1),
+	}
+	repo.fetchSem <- struct{}{}
+
+	assert.True(t, repo.HasCommit(ctx, "HEAD"))
+	assert.True(t, repo.HasCommit(ctx, "v1.0.0"))
+
+	assert.False(t, repo.HasCommit(ctx, "nonexistent"))
+	assert.False(t, repo.HasCommit(ctx, "v9.9.9"))
 }

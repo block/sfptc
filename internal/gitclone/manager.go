@@ -15,6 +15,23 @@ import (
 	"github.com/alecthomas/errors"
 )
 
+var (
+	sharedManager   *Manager
+	sharedManagerMu sync.RWMutex
+)
+
+func SetShared(m *Manager) {
+	sharedManagerMu.Lock()
+	defer sharedManagerMu.Unlock()
+	sharedManager = m
+}
+
+func GetShared() *Manager {
+	sharedManagerMu.RLock()
+	defer sharedManagerMu.RUnlock()
+	return sharedManager
+}
+
 type State int
 
 const (
@@ -130,6 +147,10 @@ func (m *Manager) Get(upstreamURL string) *Repository {
 	m.clonesMu.RLock()
 	defer m.clonesMu.RUnlock()
 	return m.clones[upstreamURL]
+}
+
+func (m *Manager) Config() Config {
+	return m.config
 }
 
 func (m *Manager) DiscoverExisting(_ context.Context) error {
@@ -428,4 +449,14 @@ func (r *Repository) GetUpstreamRefs(ctx context.Context) (map[string]string, er
 	}
 
 	return ParseGitRefs(output), nil
+}
+
+func (r *Repository) HasCommit(ctx context.Context, ref string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// #nosec G204 - r.path and ref are controlled by us
+	cmd := exec.CommandContext(ctx, "git", "-C", r.path, "cat-file", "-e", ref)
+	err := cmd.Run()
+	return err == nil
 }
