@@ -47,8 +47,8 @@ func (p *privateFetcher) Query(ctx context.Context, path, query string) (version
 		return "", time.Time{}, errors.Wrapf(err, "get or create clone for %s", path)
 	}
 
-	if repo.State() != gitclone.StateReady {
-		return "", time.Time{}, errors.Errorf("repository %s not cloned yet", gitURL)
+	if err := p.ensureReady(ctx, repo); err != nil {
+		return "", time.Time{}, errors.Wrapf(err, "ensure repository ready for %s", gitURL)
 	}
 
 	resolvedVersion, commitTime, err := p.resolveVersionQuery(ctx, repo, query)
@@ -69,8 +69,8 @@ func (p *privateFetcher) List(ctx context.Context, path string) (versions []stri
 		return nil, errors.Wrapf(err, "get or create clone for %s", path)
 	}
 
-	if repo.State() != gitclone.StateReady {
-		return nil, errors.Errorf("repository %s not cloned yet", gitURL)
+	if err := p.ensureReady(ctx, repo); err != nil {
+		return nil, errors.Wrapf(err, "ensure repository ready for %s", gitURL)
 	}
 
 	versions, err = p.listVersions(ctx, repo)
@@ -91,8 +91,8 @@ func (p *privateFetcher) Download(ctx context.Context, path, version string) (in
 		return nil, nil, nil, errors.Wrapf(err, "get or create clone for %s", path)
 	}
 
-	if repo.State() != gitclone.StateReady {
-		return nil, nil, nil, errors.Errorf("repository %s not cloned yet", gitURL)
+	if err := p.ensureReady(ctx, repo); err != nil {
+		return nil, nil, nil, errors.Wrapf(err, "ensure repository ready for %s", gitURL)
 	}
 
 	if err := p.verifyCommitExists(ctx, repo, version); err != nil {
@@ -114,6 +114,37 @@ func (p *privateFetcher) Download(ctx context.Context, path, version string) (in
 	}
 
 	return infoReader, modReader, zipReader, nil
+}
+
+func (p *privateFetcher) ensureReady(ctx context.Context, repo *gitclone.Repository) error {
+	if repo.State() == gitclone.StateReady {
+		return nil
+	}
+
+	config := p.cloneManager.Config()
+	if err := repo.Clone(ctx, config); err != nil {
+		return errors.Wrap(err, "clone repository")
+	}
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	timeout := time.After(30 * time.Minute) // reasonable timeout for cloning
+
+	for {
+		if repo.State() == gitclone.StateReady {
+			return nil
+		}
+
+		select {
+		case <-ticker.C:
+			// Continue polling
+		case <-timeout:
+			return errors.Errorf("timeout waiting for repository %s to be ready", repo.UpstreamURL())
+		case <-ctx.Done():
+			return errors.Wrap(ctx.Err(), "context cancelled while waiting for clone")
+		}
+	}
 }
 
 func (p *privateFetcher) modulePathToGitURL(modulePath string) string {

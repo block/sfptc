@@ -149,6 +149,10 @@ func (m *Manager) Get(upstreamURL string) *Repository {
 	return m.clones[upstreamURL]
 }
 
+func (m *Manager) Config() Config {
+	return m.config
+}
+
 func (m *Manager) DiscoverExisting(_ context.Context) error {
 	err := filepath.Walk(m.config.RootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
