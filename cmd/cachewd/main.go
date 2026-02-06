@@ -47,6 +47,15 @@ var cli struct {
 }
 
 func main() {
+	kctx, providersConfig := parseConfig()
+
+	ctx := context.Background()
+	logger, ctx := logging.Configure(ctx, cli.LoggingConfig)
+
+	startServer(ctx, logger, kctx, providersConfig)
+}
+
+func parseConfig() (*kong.Context, *hcl.AST) {
 	// 1. Get defaults
 	defaults := struct{ GlobalConfig }{}
 	_, err := kong.New(&defaults, kong.Exit(func(int) {}))
@@ -58,22 +67,25 @@ func main() {
 	// 2. Parse CLI/env
 	kctx := kong.Parse(&cli, kong.DefaultEnvars("CACHEW"))
 
-	// 3. Parse HCL
+	// 3. Save CLI/env values that differ from defaults (these take precedence)
+	saved := saveNonDefaultValues(&cli.GlobalConfig, &defaults.GlobalConfig)
+
+	// 4. Parse and unmarshal HCL (this overwrites cli.GlobalConfig)
 	ast, err := hcl.Parse(cli.Config)
 	kctx.FatalIfErrorf(err)
 
 	globalConfig, providersConfig := config.Split[GlobalConfig](ast)
 
-	// 4. Inject CLI/env into AST
-	injectCLIValuesIntoAST(globalConfig, &cli.GlobalConfig, &defaults.GlobalConfig)
-
-	// 5. Unmarshal
 	err = hcl.UnmarshalAST(globalConfig, &cli.GlobalConfig)
 	kctx.FatalIfErrorf(err)
 
-	ctx := context.Background()
-	logger, ctx := logging.Configure(ctx, cli.LoggingConfig)
+	// 5. Restore CLI/env values (precedence: defaults < HCL < env < CLI)
+	restoreValues(&cli.GlobalConfig, saved)
 
+	return kctx, providersConfig
+}
+
+func startServer(ctx context.Context, logger *slog.Logger, kctx *kong.Context, providersConfig *hcl.AST) {
 	scheduler := jobscheduler.New(ctx, cli.SchedulerConfig)
 
 	cr := cache.NewRegistry()
@@ -122,11 +134,11 @@ func main() {
 		_, _ = w.Write([]byte("OK")) //nolint:errcheck
 	})
 
-	err = config.Load(ctx, cr, sr, providersConfig, mux, parseEnvars())
+	err := config.Load(ctx, cr, sr, providersConfig, mux, parseEnvars())
 	kctx.FatalIfErrorf(err)
 
-	metricsClient, err := metrics.New(ctx, cli.MetricsConfig)
-	kctx.FatalIfErrorf(err, "failed to create metrics client")
+	metricsClient, metricsErr := metrics.New(ctx, cli.MetricsConfig)
+	kctx.FatalIfErrorf(metricsErr, "failed to create metrics client")
 	defer func() {
 		if err := metricsClient.Close(); err != nil {
 			logger.ErrorContext(ctx, "failed to close metrics client", "error", err)
@@ -176,65 +188,78 @@ func parseEnvars() map[string]string {
 	return envars
 }
 
-// injectCLIValuesIntoAST modifies the HCL AST to include CLI/env values that were explicitly set.
-// Precedence: defaults < HCL file < env vars < command-line args
-func injectCLIValuesIntoAST(ast *hcl.AST, target, defaults *GlobalConfig) {
-	targetVal := reflect.ValueOf(target).Elem()
-	defaultsVal := reflect.ValueOf(defaults).Elem()
+// buildFieldPath constructs a dot-separated field path.
+func buildFieldPath(path, fieldName string) string {
+	if path != "" {
+		return path + "." + fieldName
+	}
+	return fieldName
+}
+
+// saveNonDefaultValues recursively saves field values that differ from defaults.
+// Returns a map of field paths to their values.
+func saveNonDefaultValues(target, defaults *GlobalConfig) map[string]any {
+	saved := make(map[string]any)
+	saveFieldValues(reflect.ValueOf(target).Elem(), reflect.ValueOf(defaults).Elem(), "", saved)
+	return saved
+}
+
+func saveFieldValues(targetVal, defaultsVal reflect.Value, path string, saved map[string]any) {
 	targetType := targetVal.Type()
 
-	for i := 0; i < targetVal.NumField(); i++ {
+	for i := range targetVal.NumField() {
 		field := targetType.Field(i)
 		targetField := targetVal.Field(i)
 		defaultField := defaultsVal.Field(i)
 
-		// Skip if not explicitly set via CLI/env
-		if reflect.DeepEqual(targetField.Interface(), defaultField.Interface()) {
+		// Skip unexported fields
+		if !targetField.CanSet() {
 			continue
 		}
 
-		hclTag := field.Tag.Get("hcl")
-		if hclTag == "" || hclTag == "-" {
+		fieldPath := buildFieldPath(path, field.Name)
+
+		// If the field is a struct, recurse into it
+		if targetField.Kind() == reflect.Struct {
+			saveFieldValues(targetField, defaultField, fieldPath, saved)
 			continue
 		}
 
-		attrName := strings.Split(hclTag, ",")[0]
-		if attrName == "" {
-			continue
+		// If the field differs from default, save it
+		if !reflect.DeepEqual(targetField.Interface(), defaultField.Interface()) {
+			saved[fieldPath] = targetField.Interface()
 		}
-
-		injectAttribute(ast, attrName, targetField)
 	}
 }
 
-// injectAttribute adds or updates an attribute in the HCL AST.
-func injectAttribute(ast *hcl.AST, name string, value reflect.Value) {
-	nodes := hcl.Find(ast, name)
-	var existingAttr *hcl.Attribute
-	for _, node := range nodes {
-		if attr, ok := node.(*hcl.Attribute); ok {
-			existingAttr = attr
-			break
-		}
-	}
+// restoreValues recursively restores saved values back into the target struct.
+func restoreValues(target *GlobalConfig, saved map[string]any) {
+	restoreFieldValues(reflect.ValueOf(target).Elem(), "", saved)
+}
 
-	var hclValue hcl.Value
-	switch value.Kind() {
-	case reflect.String:
-		hclValue = &hcl.String{Str: value.String()}
-	default:
-		// Complex types need recursive handling
-		return
-	}
+func restoreFieldValues(targetVal reflect.Value, path string, saved map[string]any) {
+	targetType := targetVal.Type()
 
-	if existingAttr != nil {
-		existingAttr.Value = hclValue
-	} else {
-		newAttr := &hcl.Attribute{
-			Key:   name,
-			Value: hclValue,
+	for i := range targetVal.NumField() {
+		field := targetType.Field(i)
+		targetField := targetVal.Field(i)
+
+		// Skip unexported fields
+		if !targetField.CanSet() {
+			continue
 		}
-		ast.Entries = append(ast.Entries, newAttr)
-		hcl.AddParentRefs(ast)
+
+		fieldPath := buildFieldPath(path, field.Name)
+
+		// If the field is a struct, recurse into it
+		if targetField.Kind() == reflect.Struct {
+			restoreFieldValues(targetField, fieldPath, saved)
+			continue
+		}
+
+		// If we have a saved value for this field, restore it
+		if savedValue, ok := saved[fieldPath]; ok {
+			targetField.Set(reflect.ValueOf(savedValue))
+		}
 	}
 }
