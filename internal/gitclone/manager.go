@@ -270,9 +270,11 @@ func (r *Repository) Clone(ctx context.Context, config Config) error {
 		return nil
 	}
 	r.state = StateCloning
+	r.mu.Unlock()
 
 	err := r.executeClone(ctx, config)
 
+	r.mu.Lock()
 	if err != nil {
 		r.state = StateEmpty
 		r.mu.Unlock()
