@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -46,13 +47,27 @@ var cli struct {
 }
 
 func main() {
+	// 1. Get defaults
+	defaults := struct{ GlobalConfig }{}
+	_, err := kong.New(&defaults, kong.Exit(func(int) {}))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting defaults: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 2. Parse CLI/env
 	kctx := kong.Parse(&cli, kong.DefaultEnvars("CACHEW"))
 
+	// 3. Parse HCL
 	ast, err := hcl.Parse(cli.Config)
 	kctx.FatalIfErrorf(err)
 
 	globalConfig, providersConfig := config.Split[GlobalConfig](ast)
 
+	// 4. Inject CLI/env into AST
+	injectCLIValuesIntoAST(globalConfig, &cli.GlobalConfig, &defaults.GlobalConfig)
+
+	// 5. Unmarshal
 	err = hcl.UnmarshalAST(globalConfig, &cli.GlobalConfig)
 	kctx.FatalIfErrorf(err)
 
@@ -159,4 +174,67 @@ func parseEnvars() map[string]string {
 		}
 	}
 	return envars
+}
+
+// injectCLIValuesIntoAST modifies the HCL AST to include CLI/env values that were explicitly set.
+// Precedence: defaults < HCL file < env vars < command-line args
+func injectCLIValuesIntoAST(ast *hcl.AST, target, defaults *GlobalConfig) {
+	targetVal := reflect.ValueOf(target).Elem()
+	defaultsVal := reflect.ValueOf(defaults).Elem()
+	targetType := targetVal.Type()
+
+	for i := 0; i < targetVal.NumField(); i++ {
+		field := targetType.Field(i)
+		targetField := targetVal.Field(i)
+		defaultField := defaultsVal.Field(i)
+
+		// Skip if not explicitly set via CLI/env
+		if reflect.DeepEqual(targetField.Interface(), defaultField.Interface()) {
+			continue
+		}
+
+		hclTag := field.Tag.Get("hcl")
+		if hclTag == "" || hclTag == "-" {
+			continue
+		}
+
+		attrName := strings.Split(hclTag, ",")[0]
+		if attrName == "" {
+			continue
+		}
+
+		injectAttribute(ast, attrName, targetField)
+	}
+}
+
+// injectAttribute adds or updates an attribute in the HCL AST.
+func injectAttribute(ast *hcl.AST, name string, value reflect.Value) {
+	nodes := hcl.Find(ast, name)
+	var existingAttr *hcl.Attribute
+	for _, node := range nodes {
+		if attr, ok := node.(*hcl.Attribute); ok {
+			existingAttr = attr
+			break
+		}
+	}
+
+	var hclValue hcl.Value
+	switch value.Kind() {
+	case reflect.String:
+		hclValue = &hcl.String{Str: value.String()}
+	default:
+		// Complex types need recursive handling
+		return
+	}
+
+	if existingAttr != nil {
+		existingAttr.Value = hclValue
+	} else {
+		newAttr := &hcl.Attribute{
+			Key:   name,
+			Value: hclValue,
+		}
+		ast.Entries = append(ast.Entries, newAttr)
+		hcl.AddParentRefs(ast)
+	}
 }
