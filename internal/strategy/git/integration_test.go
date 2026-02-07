@@ -19,6 +19,7 @@ import (
 
 	"github.com/alecthomas/assert/v2"
 
+	"github.com/block/cachew/internal/gitclone"
 	"github.com/block/cachew/internal/jobscheduler"
 	"github.com/block/cachew/internal/logging"
 	"github.com/block/cachew/internal/strategy/git"
@@ -56,11 +57,12 @@ func TestIntegrationGitCloneViaProxy(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create the git strategy
-	mux := http.NewServeMux()
-	strategy, err := git.New(ctx, git.Config{
+	gc := gitclone.NewManagerProvider(ctx, gitclone.Config{
 		MirrorRoot:    clonesDir,
 		FetchInterval: 15,
-	}, jobscheduler.New(ctx, jobscheduler.Config{}), nil, mux)
+	})
+	mux := http.NewServeMux()
+	strategy, err := git.New(ctx, git.Config{}, jobscheduler.New(ctx, jobscheduler.Config{}), nil, mux, gc)
 	assert.NoError(t, err)
 	assert.NotZero(t, strategy)
 
@@ -134,11 +136,13 @@ func TestIntegrationGitFetchViaProxy(t *testing.T) {
 	err := os.MkdirAll(workDir, 0o750)
 	assert.NoError(t, err)
 
-	mux := http.NewServeMux()
-	_, err = git.New(ctx, git.Config{
+	gc := gitclone.NewManagerProvider(ctx, gitclone.Config{
 		MirrorRoot:    clonesDir,
 		FetchInterval: 15,
-	}, jobscheduler.New(ctx, jobscheduler.Config{}), nil, mux)
+	})
+
+	mux := http.NewServeMux()
+	_, err = git.New(ctx, git.Config{}, jobscheduler.New(ctx, jobscheduler.Config{}), nil, mux, gc)
 	assert.NoError(t, err)
 
 	server := testServerWithLogging(ctx, mux)
@@ -214,10 +218,11 @@ func TestIntegrationPushForwardsToUpstream(t *testing.T) {
 	defer upstreamServer.Close()
 
 	mux := http.NewServeMux()
-	_, err = git.New(ctx, git.Config{
+	gc := gitclone.NewManagerProvider(ctx, gitclone.Config{
 		MirrorRoot:    clonesDir,
 		FetchInterval: 15,
-	}, jobscheduler.New(ctx, jobscheduler.Config{}), nil, mux)
+	})
+	_, err = git.New(ctx, git.Config{}, jobscheduler.New(ctx, jobscheduler.Config{}), nil, mux, gc)
 	assert.NoError(t, err)
 
 	server := testServerWithLogging(ctx, mux)
@@ -307,10 +312,11 @@ func TestIntegrationSpoolReusesDuringClone(t *testing.T) {
 	var upstreamUploadPackRequests atomic.Int32
 
 	mux := http.NewServeMux()
-	strategy, err := git.New(ctx, git.Config{
+	gc := gitclone.NewManagerProvider(ctx, gitclone.Config{
 		MirrorRoot:    clonesDir,
 		FetchInterval: 15,
-	}, jobscheduler.New(ctx, jobscheduler.Config{}), nil, mux)
+	})
+	strategy, err := git.New(ctx, git.Config{}, jobscheduler.New(ctx, jobscheduler.Config{}), nil, mux, gc)
 	assert.NoError(t, err)
 
 	strategy.SetHTTPTransport(&countingTransport{

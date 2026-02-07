@@ -21,16 +21,16 @@ var ErrSpoolFailed = errors.New("spool failed before response started")
 // allowing one writer and multiple concurrent readers. Readers follow the writer,
 // blocking when caught up until the write completes.
 type ResponseSpool struct {
-	mu       sync.Mutex
-	cond     *sync.Cond
-	filePath string
-	file     *os.File
-	status   int
-	headers  http.Header
-	written  int64
-	complete bool
-	err      error
-	readers  sync.WaitGroup
+	mu          sync.Mutex
+	cond        *sync.Cond
+	filePath    string
+	file        *os.File
+	status      int
+	headers     http.Header
+	written     int64
+	complete    bool
+	err         error
+	readerCount int
 }
 
 func NewResponseSpool(filePath string) (*ResponseSpool, error) {
@@ -102,8 +102,15 @@ func (rs *ResponseSpool) Failed() bool {
 
 // ServeTo streams the spooled response to w, blocking when caught up to the writer.
 func (rs *ResponseSpool) ServeTo(w http.ResponseWriter) error {
-	rs.readers.Add(1)
-	defer rs.readers.Done()
+	rs.mu.Lock()
+	rs.readerCount++
+	rs.mu.Unlock()
+	defer func() {
+		rs.mu.Lock()
+		rs.readerCount--
+		rs.cond.Broadcast()
+		rs.mu.Unlock()
+	}()
 
 	// Wait for headers to be available.
 	rs.mu.Lock()
@@ -168,7 +175,11 @@ func (rs *ResponseSpool) ServeTo(w http.ResponseWriter) error {
 
 // WaitForReaders blocks until all active spool readers have finished.
 func (rs *ResponseSpool) WaitForReaders() {
-	rs.readers.Wait()
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	for rs.readerCount > 0 {
+		rs.cond.Wait()
+	}
 }
 
 // SpoolTeeWriter wraps an http.ResponseWriter to capture the response into a spool
